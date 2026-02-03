@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   DESIGN TOKENS - Dark Mode Primary
+   ============================================ */
+
+@layer base {
+  :root {
+    /* Background colors (Dark Mode) */
+    --background: 222 47% 11%; /* #0f172a - near black blue */
+    --surface: 222 47% 15%; /* #1e293b - slightly lighter */
+    --surface-hover: 222 47% 20%; /* #334155 */
+
+    /* Border colors */
+    --border: 214 32% 91% / 0.1; /* subtle low-opacity */
+    --border-hover: 214 32% 91% / 0.2;
+
+    /* Text colors */
+    --foreground: 210 40% 98%; /* #fafafa - near white */
+    --muted: 215 16% 47%; /* #94a3b8 */
+    --muted-foreground: 217 10% 35%; /* #64748b */
+
+    /* Primary accent (Indigo/Violet) */
+    --primary: 262 83% 58%; /* #8b5cf6 - violet/indigo */
+    --primary-hover: 262 83% 48%;
+    --primary-fg: 0 0% 100%;
+
+    /* Semantic colors */
+    --success: 142 76% 36%; /* #10b981 - green */
+    --warning: 38 92% 50%; /* #f59e0b - amber */
+    --error: 0 84% 60%; /* #ef4444 - red */
+    --info: 199 89% 48%; /* #0ea5e9 - sky */
+
+    /* Chart colors (distinct for multiple series) */
+    --chart-1: 262 83% 58%; /* violet */
+    --chart-2: 199 89% 48%; /* sky */
+    --chart-3: 142 76% 36%; /* emerald */
+    --chart-4: 38 92% 50%; /* amber */
+    --chart-5: 0 84% 60%; /* red */
+
+    /* Font families */
+    --font-display: "Geist Sans", "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
+
+    /* Border radius */
+    --radius: 0.5rem; /* 8px */
+  }
+
+  /* Light mode (optional) */
+  .light {
+    --background: 0 0% 100%; /* white */
+    --surface: 210 40% 96%; /* #f1f5f9 */
+    --surface-hover: 210 40% 94%;
+    --border: 214 32% 91% / 0.5;
+    --foreground: 222 47% 11%; /* #0f172a */
+    --muted: 215 16% 47%;
+    --muted-foreground: 215 20% 40%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Focus states - WCAG 2.1 AA compliant */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+@layer utilities {
+  /* Glassmorphism effect */
+  .glass {
+    background: hsla(var(--background) / 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsla(var(--border) / 1);
+  }
+
+  .glass-light {
+    background: hsla(0 0% 100% / 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsla(0 0% 0% / 0.1);
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ============================================
+   BASE COMPONENT STYLES
+   ============================================ */
+
+@layer components {
+  /* Card styles */
+  .card {
+    @apply bg-surface border border-border rounded-lg shadow-sm;
+  }
+
+  .card-hover {
+    @apply transition-all duration-normal hover:shadow-md hover:border-border-hover;
+  }
+
+  /* Button base */
+  .btn-primary {
+    @apply bg-primary text-primary-fg rounded-md px-4 py-2 font-medium transition-all duration-fast hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-secondary {
+    @apply bg-surface border border-border text-foreground rounded-md px-4 py-2 font-medium transition-all duration-fast hover:bg-surface-hover hover:border-border-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Input base */
+  .input-base {
+    @apply bg-background border border-border rounded-md px-3 py-2 text-foreground placeholder:text-muted-foreground transition-all duration-fast focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:border-primary disabled:opacity-50 disabled:pointer-events-none;
+  }
+}

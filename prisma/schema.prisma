@@ -1,0 +1,236 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model Benchmark {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  prompt      String   @db.Text
+  primaryCategory CategoryType // Primary category using enum
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  runs        BenchmarkRun[]
+  categories  BenchmarkCategory[] // Many-to-many with category model
+}
+
+model BenchmarkCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  color       String?  // For UI theming
+  createdAt   DateTime @default(now())
+
+  // Relations
+  benchmarks  Benchmark[]
+  metrics     CategoryMetric[]
+  scores      CategoryScore[]
+  scoreValues Score[]  // Opposite relation for Score.category
+}
+
+model CategoryMetric {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  weight      Float    @default(1.0) // 0.0 to 1.0
+  categoryId  String
+  createdAt   DateTime @default(now())
+
+  category    BenchmarkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  scores      Score[]
+  metricScores MetricScore[]  // Opposite relation for MetricScore.metric
+
+  @@unique([name, categoryId])
+  @@index([categoryId])
+}
+
+model BenchmarkRun {
+  id          String   @id @default(cuid())
+  benchmarkId String
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  status      RunStatus @default(PENDING)
+  timeoutSec  Int?     // null = no timeout
+
+  // Configuration
+  evaluator   String   // Model ID used for evaluation
+  concurrency Int      @default(5)
+
+  // Relations
+  benchmark   Benchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+  modelRuns   ModelRun[]
+
+  @@index([benchmarkId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model ModelRun {
+  id           String   @id @default(cuid())
+  benchmarkRunId String
+  modelId      String
+
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  status       RunStatus @default(PENDING)
+
+  // LLM Output
+  output       String   @db.Text
+  tokensUsed   Int?
+  cost         Float?
+
+  // Relations
+  benchmarkRun BenchmarkRun @relation(fields: [benchmarkRunId], references: [id], onDelete: Cascade)
+  scores       Score[]
+  humanRatings HumanRating[]
+  categoryScores CategoryScore[]
+
+  @@index([benchmarkRunId, modelId])
+  @@index([status])
+}
+
+model Score {
+  id           String   @id @default(cuid())
+  modelRunId   String
+  categoryId   String
+  metricId     String?
+
+  value        Float    // 0.0 to 100.0 (renamed from 'score' to avoid conflict)
+  aiConfidence Float?   // AI's confidence in this score
+  humanOverride Boolean  @default(false)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  modelRun     ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
+  category     BenchmarkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  metric       CategoryMetric? @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  metricScores MetricScore[]
+
+  @@index([modelRunId, categoryId])
+  @@index([metricId])
+}
+
+model CategoryScore {
+  id          String   @id @default(cuid())
+  modelRunId   String
+  categoryId  String
+
+  totalScore  Float    // Weighted average of metrics
+
+  // Relations
+  modelRun    ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
+  category    BenchmarkCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([modelRunId, categoryId])
+  @@index([modelRunId])
+}
+
+model MetricScore {
+  id           String   @id @default(cuid())
+  scoreId      String
+  metricId     String
+
+  value        Float    // 0.0 to 100.0 (renamed from 'score')
+  explanation  String?  @db.Text // AI's reasoning
+
+  // Relations
+  score        Score @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+  metric       CategoryMetric @relation(fields: [metricId], references: [id])
+
+  @@unique([scoreId, metricId])
+  @@index([scoreId])
+  @@index([metricId])
+}
+
+model HumanRating {
+  id          String   @id @default(cuid())
+  modelRunId   String
+  categoryId  String?
+
+  rating      Float    // 0.0 to 100.0
+  notes       String?  @db.Text
+
+  createdAt   DateTime @default(now())
+
+  // Relations
+  modelRun    ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
+
+  @@index([modelRunId])
+}
+
+model Model {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  provider    ModelProvider
+  providerId  String   // e.g., "gpt-4o", "claude-3-5-sonnet"
+  description String?
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([provider])
+  @@index([isActive])
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  provider    ModelProvider
+  keyValue    String   // Encrypted in production
+  label       String?
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  lastUsed    DateTime?
+
+  @@index([provider])
+  @@index([isActive])
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+// Renamed from BenchmarkCategory to avoid conflict with model
+enum CategoryType {
+  CODING
+  WRITING
+  REASONING
+  DEBUGGING
+  API_DESIGN
+  DATABASE_SCHEMA
+  UI_UX_DESIGN
+  DATA_ANALYSIS
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  TIMEOUT
+}
+
+enum ModelProvider {
+  OPENAI
+  ANTHROPIC
+  OPENROUTER
+  CUSTOM
+}
