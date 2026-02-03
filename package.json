@@ -3,12 +3,21 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -44,6 +53,7 @@
     "prettier-plugin-tailwindcss": "^0.6.14",
     "prisma": "^6.1.0",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.2"
   },
   "engines": {
