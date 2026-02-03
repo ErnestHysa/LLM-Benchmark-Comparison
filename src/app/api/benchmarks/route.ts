@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ListBenchmarksQuerySchema } from "@/lib/validators";
-import { errorResponse, getStatusCode, NotFoundError, ValidationError } from "@/lib/errors";
+import { errorResponse, getStatusCode, ValidationError } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
   try {
@@ -28,14 +28,7 @@ export async function GET(request: NextRequest) {
     const { category, limit, offset, search } = validationResult.data;
 
     // Build where clause
-    const where: {
-      primaryCategory?: string;
-      isPublic?: boolean;
-      OR?: Array<{
-        name?: { contains: string; mode?: "insensitive" };
-        description?: { contains: string; mode?: "insensitive" };
-      }>;
-    } = {
+    const where: Record<string, unknown> = {
       isPublic: true, // Only show public benchmarks
     };
 

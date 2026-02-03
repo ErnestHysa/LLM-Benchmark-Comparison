@@ -752,7 +752,7 @@ async function main() {
   console.log("📦 Seeding default models...");
   for (const model of DEFAULT_MODELS) {
     await prisma.model.upsert({
-      where: { providerId: model.providerId },
+      where: { name: model.name },
       update: {},
       create: model,
     });

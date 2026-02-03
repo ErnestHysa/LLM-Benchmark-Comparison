@@ -11,9 +11,9 @@ import type {
   LLMResponse,
   RetryConfig,
   RateLimitConfig,
-} from "./types.js";
-import { DEFAULT_RETRY_CONFIG, DEFAULT_RATE_LIMIT } from "./types.js";
-import { LLMError, LLMRateLimitError } from "../errors.js";
+} from "./types";
+import { DEFAULT_RETRY_CONFIG, DEFAULT_RATE_LIMIT } from "./types";
+import { LLMError, LLMRateLimitError } from "../errors";
 
 /**
  * Custom endpoint configuration
@@ -214,7 +214,7 @@ export class CustomAPIClient {
             let retryAfter = currentDelay;
             // Check for Retry-After header
             const retryAfterMatch = error.message.match(/retry-after[:\s]+(\d+)/i);
-            if (retryAfterMatch) {
+            if (retryAfterMatch?.[1]) {
               retryAfter = parseInt(retryAfterMatch[1], 10) * 1000;
             }
             await delay(retryAfter);

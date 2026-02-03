@@ -13,7 +13,7 @@ export type {
   RateLimitConfig,
   ModelConfig,
   ModelProvider,
-} from "./types.js";
+} from "./types";
 
 export {
   PREDEFINED_MODELS,
@@ -21,16 +21,16 @@ export {
   getProviderForModel,
   DEFAULT_RETRY_CONFIG,
   DEFAULT_RATE_LIMIT,
-} from "./types.js";
+} from "./types";
 
 // Re-export OpenAI client
-export { OpenAIClient, getOpenAIClient, resetOpenAIClient } from "./openai.js";
+export { OpenAIClient, getOpenAIClient, resetOpenAIClient } from "./openai";
 
 // Re-export Anthropic client
-export { AnthropicClient, getAnthropicClient, resetAnthropicClient } from "./anthropic.js";
+export { AnthropicClient, getAnthropicClient, resetAnthropicClient } from "./anthropic";
 
 // Re-export OpenRouter client
-export { OpenRouterClient, getOpenRouterClient, resetOpenRouterClient } from "./openrouter.js";
+export { OpenRouterClient, getOpenRouterClient, resetOpenRouterClient } from "./openrouter";
 
 // Re-export Custom client
 export {
@@ -40,7 +40,7 @@ export {
   unregisterCustomClient,
   listCustomClients,
   type CustomEndpointConfig,
-} from "./custom.js";
+} from "./custom";
 
 // Re-export Evaluator
 export {
@@ -52,19 +52,19 @@ export {
   type CategoryEvaluation,
   type EvaluationResult,
   type EvaluationRequest,
-} from "./evaluator.js";
+} from "./evaluator";
 
 /**
  * Unified LLM client interface
  * Automatically selects the correct client based on model ID
  */
-import { getProviderForModel } from "./types.js";
-import { getOpenAIClient } from "./openai.js";
-import { getAnthropicClient } from "./anthropic.js";
-import { getOpenRouterClient } from "./openrouter.js";
-import { getCustomClient } from "./custom.js";
-import type { ChatMessage, LLMRequestOptions, LLMResponse } from "./types.js";
-import { LLMError } from "../errors.js";
+import { getProviderForModel } from "./types";
+import { getOpenAIClient } from "./openai";
+import { getAnthropicClient } from "./anthropic";
+import { getOpenRouterClient } from "./openrouter";
+import { getCustomClient } from "./custom";
+import type { ChatMessage, LLMRequestOptions, LLMResponse } from "./types";
+import { LLMError } from "../errors";
 
 /**
  * Get the appropriate client for a model

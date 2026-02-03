@@ -9,9 +9,9 @@ import type {
   LLMResponse,
   RetryConfig,
   RateLimitConfig,
-} from "./types.js";
-import { DEFAULT_RETRY_CONFIG, DEFAULT_RATE_LIMIT } from "./types.js";
-import { LLMError, LLMRateLimitError } from "../errors.js";
+} from "./types";
+import { DEFAULT_RETRY_CONFIG, DEFAULT_RATE_LIMIT } from "./types";
+import { LLMError, LLMRateLimitError } from "../errors";
 
 /**
  * Rate limiter using token bucket algorithm

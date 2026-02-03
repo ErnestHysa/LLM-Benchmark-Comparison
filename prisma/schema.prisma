@@ -89,7 +89,7 @@ model ModelRun {
   status       RunStatus @default(PENDING)
 
   // LLM Output
-  output       String   @db.Text
+  output       String   @db.Text @default("")
   tokensUsed   Int?
   cost         Float?
 

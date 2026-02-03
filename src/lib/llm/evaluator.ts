@@ -7,13 +7,12 @@
 
 import type {
   ChatMessage,
-  LLMRequestOptions,
-} from "./types.js";
-import { getOpenAIClient, type OpenAIClient } from "./openai.js";
-import { getAnthropicClient, type AnthropicClient } from "./anthropic.js";
-import { getOpenRouterClient, type OpenRouterClient } from "./openrouter.js";
-import { getCustomClient, type CustomAPIClient } from "./custom.js";
-import { LLMError } from "../errors.js";
+} from "./types";
+import { getOpenAIClient, type OpenAIClient } from "./openai";
+import { getAnthropicClient, type AnthropicClient } from "./anthropic";
+import { getOpenRouterClient, type OpenRouterClient } from "./openrouter";
+import { getCustomClient, type CustomAPIClient } from "./custom";
+import { LLMError } from "../errors";
 
 /**
  * Evaluation result for a single metric
@@ -361,7 +360,7 @@ export async function evaluateOutputs(
  * Used when AI evaluator is not available
  */
 export function simpleTextComparison(
-  prompt: string,
+  _prompt: string,
   outputs: Array<{ modelId: string; output: string }>
 ): EvaluationResult[] {
   // Simple heuristic: longer output with more unique words might be better

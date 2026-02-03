@@ -13,11 +13,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { RunBenchmarkSchema } from "@/lib/validators";
-import { errorResponse, getStatusCode, ValidationError, NotFoundError, BenchmarkTimeoutError } from "@/lib/errors";
+import { errorResponse, getStatusCode, ValidationError, NotFoundError } from "@/lib/errors";
 import { logError } from "@/lib/errors";
 import { chat } from "@/lib/llm";
-import { evaluateOutput } from "@/lib/llm/evaluator";
-import { getCategoryMetrics } from "@/lib/llm/evaluator";
+import { evaluateOutput, getCategoryMetrics } from "@/lib/llm/evaluator";
 
 /**
  * Simple in-memory rate limiter per IP
@@ -251,7 +250,7 @@ export async function POST(request: NextRequest) {
       });
 
       // Save category scores
-      const { categoryEvaluations, totalScore, aiConfidence } = result.evaluation;
+      const { categoryEvaluations } = result.evaluation;
 
       for (const catEval of categoryEvaluations) {
         // Get or create category
