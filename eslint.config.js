@@ -1,9 +1,9 @@
-const { FlatCompat } = require("@eslint/eslintrc");
-const { dirname } = require("path");
-const { fileURLToPath } = require("url");
+import { FlatCompat } from "@eslint/eslintrc";
+import { dirname } from "path";
+import { fileURLToPath } from "url";
 
-__filename = fileURLToPath(import.meta.url);
-__dirname = dirname(__filename);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const compat = new FlatCompat({
   baseDirectory: __dirname,
@@ -34,4 +34,4 @@ const eslintConfig = [
   },
 ];
 
-module.exports = eslintConfig;
+export default eslintConfig;

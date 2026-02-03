@@ -41,7 +41,7 @@
     --chart-5: 0 84% 60%; /* red */
 
     /* Font families */
-    --font-display: "Geist Sans", "Inter", system-ui, -apple-system, sans-serif;
+    --font-display: "Inter", system-ui, -apple-system, sans-serif;
     --font-mono: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
 
     /* Border radius */
