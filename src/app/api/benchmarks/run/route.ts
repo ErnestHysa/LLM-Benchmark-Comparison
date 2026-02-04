@@ -59,6 +59,13 @@ async function executeModelRun(
   evaluation: any;
   error?: string;
 }> {
+  console.info("[Run API] Executing model run:", {
+    modelId,
+    evaluator: `${evaluatorProvider}:${evaluator}`,
+    hasApiKeys: !!apiKeys,
+    timeoutMs,
+  });
+
   try {
     // Check for abort signal
     if (signal?.aborted) {
@@ -67,9 +74,14 @@ async function executeModelRun(
 
     // Step 1: Get LLM output
     const messages = [
-      { role: "system" as const, content: "You are a helpful AI assistant. Provide a complete, accurate response." },
+      {
+        role: "system" as const,
+        content: "You are a helpful AI assistant. Provide a complete, accurate response.",
+      },
       { role: "user" as const, content: benchmark.prompt },
     ];
+
+    console.info("[Run API] Calling LLM chat for model:", modelId);
 
     const llmResponse = await chat(
       modelId,
@@ -82,21 +94,37 @@ async function executeModelRun(
       apiKeys
     );
 
+    console.info("[Run API] LLM response received for model:", {
+      modelId,
+      contentLength: llmResponse.content?.length || 0,
+      tokensUsed: llmResponse.tokensUsed,
+    });
+
     // Check for abort again
     if (signal?.aborted) {
       throw new Error("Run cancelled");
     }
 
     // Step 2: Evaluate output
+    console.info("[Run API] Evaluating output with evaluator:", {
+      evaluator: `${evaluatorProvider}:${evaluator}`,
+      outputLength: llmResponse.content?.length || 0,
+    });
+
     const evaluation = await evaluateOutput({
       modelId,
       output: llmResponse.content,
       prompt: benchmark.prompt,
       categories,
       evaluatorModelId: evaluator,
-      evaluatorProvider: evaluatorProvider as any,
+      evaluatorProvider: evaluatorProvider.toLowerCase() as any,
       evaluatorApiKey: apiKeys?.[evaluatorProvider.toLowerCase()],
       benchmarkId: benchmark.id,
+    });
+
+    console.info("[Run API] Evaluation completed for model:", {
+      modelId,
+      totalScore: evaluation?.totalScore,
     });
 
     return {
@@ -106,6 +134,10 @@ async function executeModelRun(
       evaluation,
     };
   } catch (error) {
+    console.error("[Run API] Model run failed for:", modelId, {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return {
       modelId,
       output: "",
@@ -121,16 +153,32 @@ async function executeModelRun(
 export async function POST(request: NextRequest) {
   try {
     // Rate limiting
-    const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+    const ip =
+      request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
     if (!checkRateLimit(ip, 10, 60000)) {
       return NextResponse.json(
-        { error: { code: "RATE_LIMITED", message: "Too many benchmark requests. Please try again later." } },
+        {
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many benchmark requests. Please try again later.",
+          },
+        },
         { status: 429 }
       );
     }
 
     // Parse and validate body
     const body = await request.json();
+    console.info("[Run API] Received request:", {
+      benchmarkId: body.benchmarkId,
+      modelIds: body.modelIds,
+      evaluator: body.evaluator,
+      evaluatorProvider: body.evaluatorProvider,
+      concurrency: body.concurrency,
+      hasApiKeys: !!body.apiKeys,
+      apiKeyProviders: body.apiKeys ? Object.keys(body.apiKeys) : [],
+    });
+
     const validationResult = RunBenchmarkSchema.safeParse(body);
 
     if (!validationResult.success) {
