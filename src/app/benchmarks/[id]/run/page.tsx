@@ -32,6 +32,7 @@ import { Play, ChevronLeft, CheckCircle2, XCircle, Loader2, AlertCircle } from "
 import Link from "next/link";
 import { Breadcrumb } from "@/components/layout";
 import { type Model, type SettingsProvider } from "@/lib/settings";
+import { saveBenchmarkRun, type BenchmarkRunSummary } from "@/lib/storage/benchmark-history";
 
 interface Benchmark {
   id: string;
@@ -248,6 +249,8 @@ export default function BenchmarkRunPage({ params }: { params: Promise<{ id: str
     setRunError(null);
     setRunResults([]);
 
+    const startTime = Date.now();
+
     try {
       const modelIdentifiers = selectedModelIds.map((modelId) => {
         const model = models.find((m) => m.id === modelId);
@@ -303,6 +306,31 @@ export default function BenchmarkRunPage({ params }: { params: Promise<{ id: str
 
       setRunResults(data.models || []);
       setShowResults(true);
+
+      // Save to local benchmark history
+      const modelResults = (data.models || []).map((m: any) => ({
+        modelId: m.modelId,
+        status: m.status as "COMPLETED" | "FAILED",
+        totalScore: m.totalScore ?? 0,
+        error: m.error,
+      }));
+      const completedModels = modelResults.filter((m: any) => m.status === "COMPLETED");
+      const topModel = completedModels.sort((a: any, b: any) => b.totalScore - a.totalScore)[0];
+
+      const runSummary: BenchmarkRunSummary = {
+        id: data.runId || crypto.randomUUID(),
+        timestamp: Date.now(),
+        duration: Date.now() - startTime,
+        benchmarkName: benchmark?.name || "Unknown",
+        benchmarkId: id,
+        modelsCount: modelResults.length,
+        completedCount: completedModels.length,
+        failedCount: modelResults.filter((m: any) => m.status === "FAILED").length,
+        topModel: topModel?.modelId,
+        topScore: topModel?.totalScore,
+        results: modelResults,
+      };
+      saveBenchmarkRun(runSummary);
 
       // If successful, redirect to results page
       if (data.runId) {
