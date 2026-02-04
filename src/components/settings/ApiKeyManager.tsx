@@ -102,6 +102,7 @@ export function ApiKeyManager({
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testingKeyId, setTestingKeyId] = useState<string | null>(null);
+  const [keyTestResults, setKeyTestResults] = useState<Record<string, TestResult>>({});
 
   const handleTestKey = async (provider: SettingsProvider, key: string, keyId?: string) => {
     if (keyId) {
@@ -121,16 +122,11 @@ export function ApiKeyManager({
       const result = testResultSchema.parse(await response.json());
       setTestResult(result);
 
-      if (result.success && keyId) {
-        // Update lastTested and lastTestSuccess
+      if (keyId) {
+        setKeyTestResults((prev) => ({ ...prev, [keyId]: result }));
         onUpdateKey(keyId, {
           lastTested: new Date().toISOString(),
-          lastTestSuccess: true,
-        });
-      } else if (keyId) {
-        onUpdateKey(keyId, {
-          lastTested: new Date().toISOString(),
-          lastTestSuccess: false,
+          lastTestSuccess: result.success,
         });
       }
     } catch {
@@ -358,20 +354,27 @@ export function ApiKeyManager({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {testingKeyId === key.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const decodedKey = atob(key.key);
-                          handleTestKey(key.provider, decodedKey, key.id);
-                        }}
-                      >
-                        <CheckCircle className="h-4 w-4" />
-                      </Button>
-                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={testingKeyId === key.id}
+                      onClick={() => {
+                        const decodedKey = atob(key.key);
+                        handleTestKey(key.provider, decodedKey, key.id);
+                      }}
+                    >
+                      {testingKeyId === key.id ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-1" />
+                          Test API Key
+                        </>
+                      )}
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -381,6 +384,26 @@ export function ApiKeyManager({
                     </Button>
                   </div>
                 </div>
+                {/* Inline test result for this key */}
+                {key.id in keyTestResults && (() => {
+                  const result = keyTestResults[key.id]!;
+                  return (
+                    <div
+                      className={`mt-2 flex items-center gap-2 text-sm p-2 rounded ${
+                        result.success
+                          ? "bg-success/10 text-success"
+                          : "bg-error/10 text-error"
+                      }`}
+                    >
+                      {result.success ? (
+                        <CheckCircle className="h-4 w-4 flex-shrink-0" />
+                      ) : (
+                        <XCircle className="h-4 w-4 flex-shrink-0" />
+                      )}
+                      <span>{result.message}</span>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           ))}
