@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { Sidebar } from "@/components/layout";
+import { Header } from "@/components/layout";
+import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({
   variable: "--font-display",
@@ -39,7 +42,33 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${inter.variable} ${ibmPlexMono.variable}`}>
-        {children}
+        {/* Skip to main content link for accessibility */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded focus:ring-2 focus:ring-ring"
+        >
+          Skip to main content
+        </a>
+
+        <div className="flex min-h-screen">
+          {/* Sidebar */}
+          <Sidebar />
+
+          {/* Main content */}
+          <div className="flex-1 flex flex-col ml-0 lg:ml-60">
+            <Header />
+            <main
+              id="main-content"
+              className="flex-1 p-4 lg:p-8"
+              tabIndex={-1}
+            >
+              {children}
+            </main>
+          </div>
+        </div>
+
+        {/* Toast notifications */}
+        <Toaster />
       </body>
     </html>
   );
