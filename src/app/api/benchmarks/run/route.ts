@@ -17,6 +17,8 @@ import { errorResponse, getStatusCode, ValidationError, NotFoundError } from "@/
 import { logError } from "@/lib/errors";
 import { chat } from "@/lib/llm";
 import { evaluateOutput, getCategoryMetrics } from "@/lib/llm/evaluator";
+import { retryWithBackoff } from "@/lib/utils/retry";
+import { classifyBenchmarkError, getBenchmarkErrorMessage } from "@/lib/utils/errors";
 
 /**
  * Simple in-memory rate limiter per IP
@@ -83,15 +85,24 @@ async function executeModelRun(
 
     console.info("[Run API] Calling LLM chat for model:", modelId);
 
-    const llmResponse = await chat(
-      modelId,
-      messages,
+    const llmResponse = await retryWithBackoff(
+      () => chat(
+        modelId,
+        messages,
+        {
+          temperature: 0.7,
+          maxTokens: 4096,
+          timeoutMs,
+        },
+        apiKeys
+      ),
       {
-        temperature: 0.7,
-        maxTokens: 4096,
-        timeoutMs,
-      },
-      apiKeys
+        maxRetries: 3,
+        baseDelay: 2000,
+        onRetry: (attempt, error, delay) => {
+          console.warn(`[Run API] Retry ${attempt}/3 for model ${modelId}: ${error.message}. Next retry in ${delay}ms`);
+        },
+      }
     );
 
     console.info("[Run API] LLM response received for model:", {
@@ -134,7 +145,11 @@ async function executeModelRun(
       evaluation,
     };
   } catch (error) {
+    const errorType = classifyBenchmarkError(error);
+    const userMessage = getBenchmarkErrorMessage(errorType, modelId);
+
     console.error("[Run API] Model run failed for:", modelId, {
+      errorType,
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
@@ -142,7 +157,7 @@ async function executeModelRun(
       modelId,
       output: "",
       evaluation: null,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: userMessage,
     };
   }
 }
