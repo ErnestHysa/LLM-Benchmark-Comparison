@@ -144,6 +144,42 @@ export function getModelConfig(modelId: string): ModelConfig | undefined {
   return PREDEFINED_MODELS[modelId];
 }
 
+/**
+ * Get the provider for a given model ID
+ *
+ * Handles:
+ * - Predefined models (from PREDEFINED_MODELS)
+ * - OpenRouter models (contain "/" in model ID like "meta-llama/llama-3-70b")
+ * - Custom endpoints (must be registered separately)
+ *
+ * @param modelId - The model identifier
+ * @returns The model provider, or undefined if not found
+ */
 export function getProviderForModel(modelId: string): ModelProvider | undefined {
-  return PREDEFINED_MODELS[modelId]?.provider;
+  // Check predefined models first
+  const predefined = PREDEFINED_MODELS[modelId];
+  if (predefined) {
+    console.info("[LLM Service] Model found in PREDEFINED_MODELS:", {
+      modelId,
+      provider: predefined.provider,
+    });
+    return predefined.provider;
+  }
+
+  // OpenRouter models use format like "provider/model" or "provider/model:tag"
+  // Examples: "meta-llama/llama-3-70b", "tngtech/tng-r1t-chimera:free"
+  if (modelId.includes("/")) {
+    console.info("[LLM Service] Detected OpenRouter model from format:", {
+      modelId,
+      provider: "openrouter",
+    });
+    return "openrouter";
+  }
+
+  // Model not recognized
+  console.warn("[LLM Service] Model not recognized, provider unknown:", {
+    modelId,
+    checkedIn: "PREDEFINED_MODELS",
+  });
+  return undefined;
 }

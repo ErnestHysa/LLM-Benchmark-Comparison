@@ -99,6 +99,28 @@ export async function chat(
   options?: LLMRequestOptions,
   apiKeys?: Record<string, string>
 ): Promise<LLMResponse> {
+  console.info("[LLM chat] Starting chat request:", {
+    modelId,
+    messageCount: messages.length,
+    hasOptions: !!options,
+    hasApiKeys: !!apiKeys,
+    apiKeyProviders: apiKeys ? Object.keys(apiKeys) : [],
+  });
+
+  const provider = getProviderForModel(modelId);
+  console.info("[LLM chat] Determined provider for model:", {
+    modelId,
+    provider: provider || "unknown",
+  });
+
   const client = getClientForModel(modelId, apiKeys);
-  return client.chat(modelId, messages, options);
+  const response = await client.chat(modelId, messages, options);
+
+  console.info("[LLM chat] Chat response received:", {
+    modelId,
+    contentLength: response.content?.length || 0,
+    tokensUsed: response.tokensUsed,
+  });
+
+  return response;
 }
