@@ -5,8 +5,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 // ============================================
@@ -17,7 +17,7 @@ model Benchmark {
   id          String   @id @default(cuid())
   name        String
   description String
-  prompt      String   @db.Text
+  prompt      String
   primaryCategory CategoryType // Primary category using enum
   isPublic    Boolean  @default(false)
   createdAt   DateTime @default(now())
@@ -89,7 +89,7 @@ model ModelRun {
   status       RunStatus @default(PENDING)
 
   // LLM Output
-  output       String   @db.Text @default("")
+  output       String   @default("")
   tokensUsed   Int?
   cost         Float?
 
@@ -147,7 +147,7 @@ model MetricScore {
   metricId     String
 
   value        Float    // 0.0 to 100.0 (renamed from 'score')
-  explanation  String?  @db.Text // AI's reasoning
+  explanation  String?  // AI's reasoning
 
   // Relations
   score        Score @relation(fields: [scoreId], references: [id], onDelete: Cascade)
@@ -164,8 +164,7 @@ model HumanRating {
   categoryId  String?
 
   rating      Float    // 0.0 to 100.0
-  notes       String?  @db.Text
-
+  notes       String?  
   createdAt   DateTime @default(now())
 
   // Relations
