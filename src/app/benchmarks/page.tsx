@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Search } from "lucide-react";
 import { Suspense } from "react";
+import { BenchmarkHistory } from "@/components/BenchmarkHistory";
 
 // Categories enum - matches Prisma schema
 const CATEGORIES = [
@@ -113,6 +114,11 @@ export default async function BenchmarksPage({
             className="pl-10 h-12"
           />
         </div>
+      </div>
+
+      {/* Local Benchmark History */}
+      <div className="animate-fade-in">
+        <BenchmarkHistory />
       </div>
 
       {/* Category Tabs */}
