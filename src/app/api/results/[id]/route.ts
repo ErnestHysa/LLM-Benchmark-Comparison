@@ -52,6 +52,16 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
                   },
                 },
                 metric: true,
+                metricScores: {
+                  include: {
+                    metric: {
+                      select: {
+                        name: true,
+                        description: true,
+                      },
+                    },
+                  },
+                },
               },
             },
             categoryScores: {
@@ -92,14 +102,24 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
         ? categoryScores.reduce((sum, cs) => sum + cs.score, 0) / categoryScores.length
         : 0;
 
-      // Get metrics breakdown
-      const metrics = modelRun.scores.map((score) => ({
-        category: score.category.name,
-        metricName: score.metric?.name || "Overall",
-        score: score.value,
-        weight: score.metric?.weight || 1,
-        confidence: score.aiConfidence,
-      }));
+      // Get metrics breakdown with explanations
+      const metrics = modelRun.scores.map((score) => {
+        // Get explanations from metric scores
+        const explanations = score.metricScores.map((ms) => ({
+          metricName: ms.metric.name,
+          explanation: ms.explanation,
+          value: ms.value,
+        }));
+
+        return {
+          category: score.category.name,
+          metricName: score.metric?.name || "Overall",
+          score: score.value,
+          weight: score.metric?.weight || 1,
+          confidence: score.aiConfidence,
+          explanations: explanations.filter((e) => e.explanation), // Only include those with explanations
+        };
+      });
 
       return {
         modelId: modelRun.modelId,
