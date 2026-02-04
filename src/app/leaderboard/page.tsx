@@ -18,6 +18,7 @@ import Link from "next/link";
 import { Breadcrumb } from "@/components/layout";
 import { PerformanceChart } from "@/components/dashboard";
 import { RegisterModelDialog } from "@/components/leaderboard/LeaderboardClient";
+import { LeaderboardActions } from "@/components/leaderboard/LeaderboardActions";
 
 interface LeaderboardPageProps {
   searchParams: Promise<{ category?: string; time?: string }>;
@@ -273,7 +274,8 @@ export default async function LeaderboardPage({
               Top performing models across all benchmarks and categories
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <LeaderboardActions entries={data.overall} />
             <RegisterModelDialog />
             <Link href="/leaderboard?time=all">
               <Button
