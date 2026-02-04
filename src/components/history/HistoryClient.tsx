@@ -80,6 +80,7 @@ export function HistoryClient({ runs }: HistoryClientProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [runsToDelete, setRunsToDelete] = useState<string[]>([]);
+  const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false);
 
   const isAllSelected = runs.length > 0 && selectedIds.size === runs.length;
   const isSomeSelected = selectedIds.size > 0 && !isAllSelected;
@@ -151,6 +152,11 @@ export function HistoryClient({ runs }: HistoryClientProps) {
     }
   };
 
+  const handleClearAll = () => {
+    openDeleteDialog(runs.map((r) => r.id));
+    setClearAllDialogOpen(false);
+  };
+
   function getStatusBadge(status: string) {
     switch (status) {
       case "COMPLETED":
@@ -205,6 +211,19 @@ export function HistoryClient({ runs }: HistoryClientProps) {
 
   return (
     <>
+      {/* Clear All Button */}
+      <div className="flex justify-end mb-4">
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setClearAllDialogOpen(true)}
+          className="gap-2"
+        >
+          <Trash2 className="h-4 w-4" />
+          Clear All Results
+        </Button>
+      </div>
+
       <Card>
         <CardContent className="p-0">
           {/* Bulk actions bar */}
@@ -342,6 +361,29 @@ export function HistoryClient({ runs }: HistoryClientProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Clear All Confirmation Dialog */}
+      <AlertDialog open={clearAllDialogOpen} onOpenChange={setClearAllDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all results?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to clear all benchmark results? This action
+              cannot be undone. All {runs.length} benchmark runs and their
+              associated data will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearAll}
+              className="bg-error text-error-foreground hover:bg-error/90"
+            >
+              Clear All Results
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
