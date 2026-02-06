@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +41,14 @@ export function RegisterModelDialog({ onModelRegistered }: RegisterModelDialogPr
   const [provider, setProvider] = useState<ModelProvider | "">("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,30 +82,36 @@ export function RegisterModelDialog({ onModelRegistered }: RegisterModelDialogPr
 
       const data = await response.json();
 
-      addToast({
-        title: "Model Registered",
-        description: `${data.model.name} has been registered successfully`,
-        variant: "success",
-      });
+      if (isMountedRef.current) {
+        addToast({
+          title: "Model Registered",
+          description: `${data.model.name} has been registered successfully`,
+          variant: "success",
+        });
 
-      // Reset form
-      setModelId("");
-      setName("");
-      setProvider("");
-      setDescription("");
-      setOpen(false);
+        // Reset form
+        setModelId("");
+        setName("");
+        setProvider("");
+        setDescription("");
+        setOpen(false);
 
-      // Refresh leaderboard
-      onModelRegistered?.();
+        // Refresh leaderboard
+        onModelRegistered?.();
+      }
     } catch (error) {
-      console.error("Register model error:", error);
-      addToast({
-        title: "Registration Failed",
-        description: error instanceof Error ? error.message : "Could not register model",
-        variant: "error",
-      });
+      if (isMountedRef.current) {
+        console.error("Register model error:", error);
+        addToast({
+          title: "Registration Failed",
+          description: error instanceof Error ? error.message : "Could not register model",
+          variant: "error",
+        });
+      }
     } finally {
-      setIsSubmitting(false);
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
     }
   };
 

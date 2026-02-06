@@ -94,8 +94,9 @@ async function getLeaderboardData(_category?: string, timeFilter?: string) {
   });
 
   for (const cat of categories) {
-    const categoryScores = await prisma.categoryScore.groupBy({
-      by: ["modelRunId"],
+    // Optimized query: Fetch category scores with modelRun in a single query
+    // This eliminates the N+1 query problem where we were querying modelRun separately for each score
+    const categoryScoresWithModel = await prisma.categoryScore.findMany({
       where: {
         categoryId: cat.id,
         modelRun: {
@@ -107,31 +108,32 @@ async function getLeaderboardData(_category?: string, timeFilter?: string) {
           },
         },
       },
-      _avg: {
+      select: {
         totalScore: true,
+        modelRun: {
+          select: {
+            modelId: true,
+          },
+        },
       },
     });
 
-    // Get model IDs and their average scores
+    // Aggregate scores by model ID
     const catModelScores = new Map<string, { totalScore: number; count: number }>();
 
-    for (const score of categoryScores) {
-      const modelRun = await prisma.modelRun.findUnique({
-        where: { id: score.modelRunId },
-        select: { modelId: true },
-      });
+    for (const scoreData of categoryScoresWithModel) {
+      const modelId = scoreData.modelRun.modelId;
+      const score = scoreData.totalScore;
 
-      if (modelRun) {
-        const existing = catModelScores.get(modelRun.modelId);
-        if (existing) {
-          existing.totalScore += score._avg.totalScore ?? 0;
-          existing.count += 1;
-        } else {
-          catModelScores.set(modelRun.modelId, {
-            totalScore: score._avg.totalScore ?? 0,
-            count: 1,
-          });
-        }
+      const existing = catModelScores.get(modelId);
+      if (existing) {
+        existing.totalScore += score;
+        existing.count += 1;
+      } else {
+        catModelScores.set(modelId, {
+          totalScore: score,
+          count: 1,
+        });
       }
     }
 
@@ -240,9 +242,25 @@ function getRankIcon(rank: number) {
 }
 
 function getScoreColor(score: number): string {
-  if (score >= 80) return "text-success";
-  if (score >= 60) return "text-warning";
+  // Guard against NaN or invalid scores
+  const validScore = Number.isFinite(score) ? score : 0;
+  if (validScore >= 80) return "text-success";
+  if (validScore >= 60) return "text-warning";
   return "text-error";
+}
+
+// Safe score utilities
+function safeScoreValue(score: number | undefined | null): number {
+  return Number.isFinite(score ?? 0) ? (score ?? 0) : 0;
+}
+
+function safeScoreDisplay(score: number | undefined | null, decimals: number = 1): string {
+  const validScore = safeScoreValue(score ?? 0);
+  return validScore.toFixed(decimals);
+}
+
+function clampScore(score: number): number {
+  return Math.max(0, Math.min(100, safeScoreValue(score)));
 }
 
 export default async function LeaderboardPage({
@@ -419,7 +437,7 @@ function LeaderboardTable({ entries }: LeaderboardTableProps) {
                         entry.avgScore
                       )}`}
                     >
-                      {entry.avgScore.toFixed(1)}
+                      {safeScoreDisplay(entry.avgScore)}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-right text-muted-foreground">
@@ -427,7 +445,7 @@ function LeaderboardTable({ entries }: LeaderboardTableProps) {
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
-                      <Progress value={entry.avgScore} className="h-2 flex-1" />
+                      <Progress value={clampScore(entry.avgScore)} className="h-2 flex-1" />
                     </div>
                   </td>
                 </tr>

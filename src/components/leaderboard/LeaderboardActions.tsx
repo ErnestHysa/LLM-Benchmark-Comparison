@@ -33,13 +33,19 @@ function exportLeaderboardToCSV(entries: LeaderboardEntry[]) {
 
   const csv = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
+  link.href = url;
   link.download = `leaderboard-${Date.now()}.csv`;
   document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
+
+  try {
+    link.click();
+  } finally {
+    // Always clean up, even if click fails
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 }
 
 function exportLeaderboardToJSON(entries: LeaderboardEntry[]) {
@@ -52,13 +58,19 @@ function exportLeaderboardToJSON(entries: LeaderboardEntry[]) {
 
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: "application/json;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
+  link.href = url;
   link.download = `leaderboard-${Date.now()}.json`;
   document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
+
+  try {
+    link.click();
+  } finally {
+    // Always clean up, even if click fails
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 }
 
 export function LeaderboardActions({ entries }: LeaderboardActionsProps) {
