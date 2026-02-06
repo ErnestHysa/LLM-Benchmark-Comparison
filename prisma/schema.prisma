@@ -20,12 +20,27 @@ model Benchmark {
   prompt      String
   primaryCategory CategoryType // Primary category using enum
   isPublic    Boolean  @default(false)
+  isSystem    Boolean  @default(false) // System templates vs user-created
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Custom Benchmark Builder fields
+  collectionId String? // Link to collection
+  difficulty   String? // beginner, intermediate, advanced, expert
+  estimatedTokens Int? // Estimated tokens needed for LLM response
+  tags         String? // JSON array of tags
+  templateId   String? // If created from a template
 
   // Relations
   runs        BenchmarkRun[]
   categories  BenchmarkCategory[] // Many-to-many with category model
+  regressionBaselines RegressionBaseline[]
+  collection  BenchmarkCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  template    BenchmarkTemplate? @relation("BenchmarkTemplate", fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([collectionId])
+  @@index([isPublic])
+  @@index([isSystem])
 }
 
 model BenchmarkCategory {
@@ -65,6 +80,7 @@ model BenchmarkRun {
   completedAt DateTime?
   status      RunStatus @default(PENDING)
   timeoutSec  Int?     // null = no timeout
+  metadata    String?  // JSON metadata for custom data (fuzz test results, etc.)
 
   // Configuration
   evaluator   String   // Model ID used for evaluation
@@ -200,6 +216,185 @@ model ApiKey {
 
   @@index([provider])
   @@index([isActive])
+}
+
+// ============================================
+// REGRESSION TESTING MODELS
+// ============================================
+
+model RegressionBaseline {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  benchmarkId     String   // The benchmark to run
+  modelIds        String   // JSON array of model IDs to test
+  evaluator       String   // Evaluator model ID
+  evaluatorProvider String  // Evaluator provider (openai, anthropic, etc.)
+
+  // Thresholds for regression detection
+  thresholdMin    Float?   // Minimum acceptable score (0-100)
+  thresholdMax    Float?   // Maximum expected score (0-100)
+  regressionDelta Float?   // Alert if score drops by this percentage
+
+  // Scheduling
+  scheduleType    String   @default("manual") // manual, daily, weekly, webhook
+  scheduleConfig   String?  // JSON config for schedule (cron, webhook URL, etc.)
+  isActive        Boolean  @default(true)
+
+  // Tracking
+  lastRunAt       DateTime?
+  lastStatus      String?  // success, failed, regressed
+  currentVersion  Int      @default(1)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  benchmark       Benchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+  runs            RegressionRun[]
+
+  @@index([benchmarkId])
+  @@index([isActive])
+  @@index([scheduleType])
+}
+
+model RegressionRun {
+  id              String   @id @default(cuid())
+  baselineId      String
+  status          String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, REGRESSED
+
+  // Results summary
+  totalScore      Float?
+  previousScore   Float?
+  scoreDiff       Float?   // Difference from previous run
+  isRegression    Boolean  @default(false)
+
+  // Trigger info
+  triggerType     String   @default("manual") // manual, schedule, webhook, ci
+  triggerMetadata String?  // JSON with additional trigger info
+
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  createdAt       DateTime @default(now())
+
+  // Relations
+  baseline        RegressionBaseline @relation(fields: [baselineId], references: [id], onDelete: Cascade)
+  modelRuns       RegressionModelRun[]
+  alerts          RegressionAlert[]
+
+  @@index([baselineId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([isRegression])
+}
+
+model RegressionModelRun {
+  id              String   @id @default(cuid())
+  regressionRunId String
+  modelId         String
+
+  // Scores
+  totalScore      Float
+  previousScore   Float?
+  scoreDiff       Float?
+
+  // Category breakdowns (JSON)
+  categoryScores  String?  // JSON array of category scores
+
+  status          String   @default("COMPLETED") // COMPLETED, FAILED
+  errorMessage    String?
+
+  createdAt       DateTime @default(now())
+
+  // Relations
+  regressionRun   RegressionRun @relation(fields: [regressionRunId], references: [id], onDelete: Cascade)
+
+  @@index([regressionRunId])
+  @@index([modelId])
+}
+
+model RegressionAlert {
+  id              String   @id @default(cuid())
+  regressionRunId String
+  baselineId      String
+
+  // Alert details
+  alertType       String   // score_dropped, threshold_failed, model_failed
+  severity        String   // info, warning, critical
+  message         String
+  metadata        String?  // JSON with additional context
+
+  // Delivery status
+  sentEmail       Boolean  @default(false)
+  sentWebhook     Boolean  @default(false)
+  sentSlack       Boolean  @default(false)
+
+  acknowledged    Boolean  @default(false)
+  acknowledgedAt  DateTime?
+
+  createdAt       DateTime @default(now())
+
+  // Relations
+  regressionRun   RegressionRun @relation(fields: [regressionRunId], references: [id], onDelete: Cascade)
+
+  @@index([regressionRunId])
+  @@index([baselineId])
+  @@index([acknowledged])
+}
+
+// ============================================
+// CUSTOM BENCHMARK BUILDER MODELS
+// ============================================
+
+model BenchmarkCollection {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  icon        String? // Emoji or icon name
+  color       String? // Hex color for UI
+  isPublic    Boolean  @default(false)
+  isSystem    Boolean  @default(false) // System collections vs user-created
+  order       Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  benchmarks  Benchmark[]
+
+  @@index([isPublic])
+  @@index([isSystem])
+  @@index([order])
+}
+
+model BenchmarkTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  category    CategoryType
+  prompt      String
+
+  // Template metadata
+  difficulty  String   // beginner, intermediate, advanced, expert
+  estimatedTokens Int?
+  tags        String? // JSON array of tags
+  examples    String? // JSON array of example inputs/outputs
+  variables   String? // JSON array of customizable variables
+
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  usesCount   Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  benchmarks  Benchmark[] @relation("BenchmarkTemplate")
+
+  @@index([category])
+  @@index([isActive])
+  @@index([isSystem])
 }
 
 // ============================================
