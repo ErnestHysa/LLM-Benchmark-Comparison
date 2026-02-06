@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/layout";
-import { Header } from "@/components/layout";
 import { Toaster } from "@/components/ui/toaster";
+import { LayoutWrapper } from "@/components/layout/LayoutWrapper";
+import { ErrorBoundary, AsyncErrorBoundary } from "@/components/errors/ErrorBoundary";
 
 const inter = Inter({
   variable: "--font-display",
@@ -50,22 +50,11 @@ export default function RootLayout({
           Skip to main content
         </a>
 
-        <div className="flex min-h-screen">
-          {/* Sidebar */}
-          <Sidebar />
-
-          {/* Main content */}
-          <div className="flex-1 flex flex-col ml-0 lg:ml-60">
-            <Header />
-            <main
-              id="main-content"
-              className="flex-1 p-4 lg:p-8"
-              tabIndex={-1}
-            >
-              {children}
-            </main>
-          </div>
-        </div>
+        <ErrorBoundary>
+          <AsyncErrorBoundary>
+            <LayoutWrapper>{children}</LayoutWrapper>
+          </AsyncErrorBoundary>
+        </ErrorBoundary>
 
         {/* Toast notifications */}
         <Toaster />
