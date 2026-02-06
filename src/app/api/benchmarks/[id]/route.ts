@@ -1,13 +1,13 @@
 /**
- * GET /api/benchmarks/[id]
- *
- * Get benchmark detail with all runs and best/worst models
+ * GET /api/benchmarks/[id] - Get benchmark detail
+ * PUT /api/benchmarks/[id] - Update benchmark
+ * DELETE /api/benchmarks/[id] - Delete benchmark
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { BenchmarkParamsSchema } from "@/lib/validators";
-import { errorResponse, getStatusCode, NotFoundError } from "@/lib/errors";
+import { errorResponse, getStatusCode, NotFoundError, ValidationError } from "@/lib/errors";
 import { logError } from "@/lib/errors";
 
 interface RouteContext {
@@ -119,6 +119,118 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
     if (error instanceof Error) {
       return NextResponse.json(response, {
         status: getStatusCode(error as any),
+      });
+    }
+
+    return NextResponse.json(response, { status: 500 });
+  }
+}
+
+// PUT /api/benchmarks/[id] - Update benchmark
+export async function PUT(request: NextRequest, { params }: RouteContext) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+
+    // Validate ID
+    const validationResult = BenchmarkParamsSchema.safeParse({ id });
+    if (!validationResult.success) {
+      throw new ValidationError("Invalid benchmark ID", validationResult.error.flatten());
+    }
+
+    // Check if benchmark exists and is not a system benchmark
+    const existing = await prisma.benchmark.findUnique({
+      where: { id: validationResult.data.id },
+    });
+
+    if (!existing) {
+      throw new NotFoundError("Benchmark", id);
+    }
+
+    if (existing.isSystem) {
+      return NextResponse.json(
+        { error: { code: "FORBIDDEN", message: "Cannot modify system benchmarks" } },
+        { status: 403 }
+      );
+    }
+
+    // Build update data
+    const updateData: any = {};
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.description !== undefined) updateData.description = body.description;
+    if (body.prompt !== undefined) updateData.prompt = body.prompt;
+    if (body.primaryCategory !== undefined) updateData.primaryCategory = body.primaryCategory;
+    if (body.isPublic !== undefined) updateData.isPublic = body.isPublic;
+    if (body.collectionId !== undefined) updateData.collectionId = body.collectionId || null;
+    if (body.difficulty !== undefined) updateData.difficulty = body.difficulty;
+    if (body.estimatedTokens !== undefined) updateData.estimatedTokens = body.estimatedTokens;
+    if (body.tags !== undefined) updateData.tags = body.tags;
+
+    const benchmark = await prisma.benchmark.update({
+      where: { id: validationResult.data.id },
+      data: updateData,
+    });
+
+    console.info(`[PUT /api/benchmarks/${id}] Updated benchmark`);
+
+    return NextResponse.json({ benchmark });
+  } catch (error) {
+    logError(error, { context: "PUT /api/benchmarks/[id]" });
+
+    const response = errorResponse(error);
+
+    if (error instanceof Error) {
+      return NextResponse.json(response, {
+        status: error instanceof ValidationError ? 400 : getStatusCode(error as any),
+      });
+    }
+
+    return NextResponse.json(response, { status: 500 });
+  }
+}
+
+// DELETE /api/benchmarks/[id] - Delete benchmark
+export async function DELETE(_request: NextRequest, { params }: RouteContext) {
+  try {
+    const { id } = await params;
+
+    // Validate ID
+    const validationResult = BenchmarkParamsSchema.safeParse({ id });
+    if (!validationResult.success) {
+      throw new ValidationError("Invalid benchmark ID", validationResult.error.flatten());
+    }
+
+    // Check if benchmark exists and is not a system benchmark
+    const existing = await prisma.benchmark.findUnique({
+      where: { id: validationResult.data.id },
+    });
+
+    if (!existing) {
+      throw new NotFoundError("Benchmark", id);
+    }
+
+    if (existing.isSystem) {
+      return NextResponse.json(
+        { error: { code: "FORBIDDEN", message: "Cannot delete system benchmarks" } },
+        { status: 403 }
+      );
+    }
+
+    await prisma.benchmark.delete({
+      where: { id: validationResult.data.id },
+    });
+
+    console.info(`[DELETE /api/benchmarks/${id}] Deleted benchmark`);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    logError(error, { context: "DELETE /api/benchmarks/[id]" });
+
+    const response = errorResponse(error);
+
+    if (error instanceof Error) {
+      return NextResponse.json(response, {
+        status: error instanceof ValidationError ? 400 : getStatusCode(error as any),
       });
     }
 

@@ -22,8 +22,55 @@ import { classifyBenchmarkError, getBenchmarkErrorMessage } from "@/lib/utils/er
 
 /**
  * Simple in-memory rate limiter per IP
+ * Includes automatic cleanup of expired entries to prevent memory leaks
  */
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+// Cleanup interval: remove expired entries every 5 minutes
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+// Extend globalThis to include our cleanup interval property
+declare global {
+  var _rateLimitCleanupInterval: NodeJS.Timeout | undefined;
+}
+
+// Start cleanup interval only if not already started (for hot reload in dev)
+if (typeof globalThis._rateLimitCleanupInterval === "undefined") {
+  globalThis._rateLimitCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    for (const [ip, record] of rateLimitMap.entries()) {
+      // Remove entries that have been expired for more than 1 hour
+      if (now > record.resetTime + 60 * 60 * 1000) {
+        rateLimitMap.delete(ip);
+        cleanedCount++;
+      }
+    }
+
+    if (cleanedCount > 0) {
+      console.info("[RateLimit] Cleaned up expired entries", {
+        cleanedCount,
+        remainingEntries: rateLimitMap.size,
+      });
+    }
+  }, CLEANUP_INTERVAL_MS);
+
+  // Clean up interval on process termination to prevent memory leaks
+  const cleanupInterval = () => {
+    if (globalThis._rateLimitCleanupInterval) {
+      clearInterval(globalThis._rateLimitCleanupInterval);
+      globalThis._rateLimitCleanupInterval = undefined;
+      console.info("[RateLimit] Cleanup interval cleared on process termination");
+    }
+  };
+
+  // Register cleanup handlers for various termination signals
+  process.on("beforeExit", cleanupInterval);
+  process.on("SIGINT", cleanupInterval);
+  process.on("SIGTERM", cleanupInterval);
+  process.on("uncaughtException", cleanupInterval);
+}
 
 function checkRateLimit(ip: string, maxRequests: number = 10, windowMs: number = 60000): boolean {
   const now = Date.now();
@@ -85,14 +132,29 @@ async function executeModelRun(
 
     console.info("[Run API] Calling LLM chat for model:", modelId);
 
+    // Check for abort signal before starting the potentially long LLM call
+    if (signal?.aborted) {
+      throw new Error("Run cancelled");
+    }
+
+    // Create an abort controller that will be triggered by the parent signal
+    const abortController = new AbortController();
+    let onParentAbort: (() => void) | undefined;
+
+    if (signal) {
+      onParentAbort = () => abortController.abort();
+      signal.addEventListener("abort", onParentAbort, { once: true });
+    }
+
     const llmResponse = await retryWithBackoff(
       () => chat(
         modelId,
         messages,
         {
           temperature: 0.7,
-          maxTokens: 4096,
+          maxTokens: 65536, // 2x+ increase - models were stopping mid-output
           timeoutMs,
+          abortSignal: abortController.signal, // Pass abort signal to chat
         },
         apiKeys
       ),
@@ -100,10 +162,21 @@ async function executeModelRun(
         maxRetries: 3,
         baseDelay: 2000,
         onRetry: (attempt, error, delay) => {
+          // Check abort before retrying
+          if (signal?.aborted || abortController.signal.aborted) {
+            throw new Error("Run cancelled");
+          }
           console.warn(`[Run API] Retry ${attempt}/3 for model ${modelId}: ${error.message}. Next retry in ${delay}ms`);
         },
       }
-    );
+    ).finally(() => {
+      // Clean up event listener - use the stored reference
+      if (onParentAbort && signal) {
+        signal.removeEventListener("abort", onParentAbort);
+      }
+      // Also abort the controller to ensure any pending requests are cancelled
+      abortController.abort();
+    });
 
     console.info("[Run API] LLM response received for model:", {
       modelId,
@@ -145,6 +218,17 @@ async function executeModelRun(
       evaluation,
     };
   } catch (error) {
+    // Check if this was a cancellation
+    if (signal?.aborted || (error instanceof Error && error.message === "Run cancelled")) {
+      console.info("[Run API] Model run cancelled for:", modelId);
+      return {
+        modelId,
+        output: "",
+        evaluation: null,
+        error: "CANCELLED",
+      };
+    }
+
     const errorType = classifyBenchmarkError(error);
     const userMessage = getBenchmarkErrorMessage(errorType, modelId);
 
@@ -230,29 +314,33 @@ export async function POST(request: NextRequest) {
     // Use default categories if not specified
     const categoriesToEvaluate = categories?.length ? categories : [benchmark.primaryCategory];
 
-    // Create benchmark run record
-    const benchmarkRun = await prisma.benchmarkRun.create({
-      data: {
-        benchmarkId,
-        evaluator: `${evaluatorProvider}:${evaluator}`,
-        concurrency,
-        timeoutSec,
-        status: "RUNNING",
-      },
-    });
+    // Create benchmark run and model run records in a single transaction
+    // This prevents orphaned records if the server crashes between operations
+    const { benchmarkRun, modelRuns } = await prisma.$transaction(async (tx) => {
+      const run = await tx.benchmarkRun.create({
+        data: {
+          benchmarkId,
+          evaluator: `${evaluatorProvider}:${evaluator}`,
+          concurrency,
+          timeoutSec,
+          status: "RUNNING",
+        },
+      });
 
-    // Create model run records
-    const modelRuns = await Promise.all(
-      modelIds.map((modelId) =>
-        prisma.modelRun.create({
-          data: {
-            benchmarkRunId: benchmarkRun.id,
-            modelId,
-            status: "PENDING",
-          },
-        })
-      )
-    );
+      const runs = await Promise.all(
+        modelIds.map((modelId) =>
+          tx.modelRun.create({
+            data: {
+              benchmarkRunId: run.id,
+              modelId,
+              status: "PENDING",
+            },
+          })
+        )
+      );
+
+      return { benchmarkRun: run, modelRuns: runs };
+    });
 
     // Execute runs in parallel with concurrency limit
     const timeoutMs = timeoutSec ? timeoutSec * 1000 : 600000; // 10 min default
@@ -265,22 +353,42 @@ export async function POST(request: NextRequest) {
     }> = [];
 
     // Process with concurrency limit
-    for (let i = 0; i < modelIds.length; i += concurrency) {
-      const batch = modelIds.slice(i, i + concurrency);
-      const batchPromises = batch.map((modelId) =>
-        executeModelRun(
-          benchmark,
-          modelId,
-          categoriesToEvaluate,
-          evaluator,
-          evaluatorProvider,
-          apiKeys,
-          timeoutMs
-        )
-      );
+    // Get the AbortSignal from the request to support cancellation
+    const signal = request.signal;
 
-      const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults);
+    // Set up a listener to detect if the client disconnects
+    const onAbort = () => {
+      console.info("[Run API] Request aborted by client", { benchmarkRunId: benchmarkRun.id });
+    };
+    signal.addEventListener("abort", onAbort);
+
+    try {
+      for (let i = 0; i < modelIds.length; i += concurrency) {
+        // Check if request was aborted before starting next batch
+        if (signal.aborted) {
+          throw new Error("Benchmark run cancelled by user");
+        }
+
+        const batch = modelIds.slice(i, i + concurrency);
+        const batchPromises = batch.map((modelId) =>
+          executeModelRun(
+            benchmark,
+            modelId,
+            categoriesToEvaluate,
+            evaluator,
+            evaluatorProvider,
+            apiKeys,
+            timeoutMs,
+            signal  // Pass the abort signal through
+          )
+        );
+
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      }
+    } finally {
+      // Clean up the abort listener
+      signal.removeEventListener("abort", onAbort);
     }
 
     // Save results to database
@@ -289,6 +397,19 @@ export async function POST(request: NextRequest) {
       if (!modelRun) continue;
 
       if (result.error) {
+        // Check if this was a cancellation
+        if (result.error === "CANCELLED") {
+          await prisma.modelRun.update({
+            where: { id: modelRun.id },
+            data: {
+              status: "CANCELLED",
+              output: "Run cancelled by user",
+              completedAt: new Date(),
+            },
+          });
+          continue;
+        }
+
         // Mark as failed
         await prisma.modelRun.update({
           where: { id: modelRun.id },
@@ -387,11 +508,25 @@ export async function POST(request: NextRequest) {
     }
 
     // Update benchmark run status
-    const hasFailures = results.some((r) => r.error);
+    const hasSuccesses = results.some((r) => !r.error);
+    const hasCancelled = results.some((r) => r.error === "CANCELLED");
+
+    // Determine appropriate status based on results
+    // Note: Using COMPLETED for partial failures since PARTIAL is not in the RunStatus enum
+    // Consider adding PARTIAL status to schema for better tracking
+    let finalStatus: "COMPLETED" | "FAILED" | "CANCELLED" = "FAILED";
+    if (hasCancelled && !hasSuccesses) {
+      finalStatus = "CANCELLED"; // All were cancelled
+    } else if (hasSuccesses) {
+      finalStatus = "COMPLETED"; // All successes or mixed (partial failures)
+    } else {
+      finalStatus = "FAILED"; // All models failed
+    }
+
     await prisma.benchmarkRun.update({
       where: { id: benchmarkRun.id },
       data: {
-        status: hasFailures ? "COMPLETED" : "COMPLETED", // Still completed even with partial failures
+        status: finalStatus,
         completedAt: new Date(),
       },
     });

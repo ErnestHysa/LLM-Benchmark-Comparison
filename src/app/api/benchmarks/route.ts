@@ -1,7 +1,6 @@
 /**
- * GET /api/benchmarks
- *
- * List all benchmarks with optional filtering
+ * GET /api/benchmarks - List all benchmarks with optional filtering
+ * POST /api/benchmarks - Create a new custom benchmark
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -118,6 +117,61 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(response, {
         status: error instanceof ValidationError ? 400 : getStatusCode(error as any),
       });
+    }
+
+    return NextResponse.json(response, { status: 500 });
+  }
+}
+
+// POST /api/benchmarks - Create a new custom benchmark
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+
+    // Validate required fields
+    if (!body.name || !body.prompt || !body.primaryCategory) {
+      throw new ValidationError("Missing required fields", {
+        name: ["Name is required"],
+        prompt: ["Prompt is required"],
+        primaryCategory: ["Primary category is required"],
+      });
+    }
+
+    // Validate category
+    const validCategories = ["CODING", "WRITING", "REASONING", "DEBUGGING", "API_DESIGN", "DATABASE_SCHEMA", "UI_UX_DESIGN", "DATA_ANALYSIS"];
+    if (!validCategories.includes(body.primaryCategory)) {
+      throw new ValidationError("Invalid category", {
+        primaryCategory: [`Must be one of: ${validCategories.join(", ")}`],
+      });
+    }
+
+    // Create benchmark
+    const benchmark = await prisma.benchmark.create({
+      data: {
+        name: body.name,
+        description: body.description || "",
+        prompt: body.prompt,
+        primaryCategory: body.primaryCategory,
+        isPublic: body.isPublic ?? false,
+        isSystem: false, // User-created benchmarks are never system benchmarks
+        collectionId: body.collectionId || null,
+        difficulty: body.difficulty || null,
+        estimatedTokens: body.estimatedTokens || null,
+        tags: body.tags || null,
+        templateId: body.templateId || null,
+      },
+    });
+
+    console.info(`[POST /api/benchmarks] Created benchmark: ${benchmark.id}`);
+
+    return NextResponse.json({ benchmark }, { status: 201 });
+  } catch (error) {
+    console.error("[POST /api/benchmarks] Error:", error);
+
+    const response = errorResponse(error);
+
+    if (error instanceof ValidationError) {
+      return NextResponse.json(response, { status: 400 });
     }
 
     return NextResponse.json(response, { status: 500 });
