@@ -155,17 +155,17 @@ describe("Scoring Utilities", () => {
 
       const result = calculateRankings(scores);
 
-      expect(result[0].modelId).toBe("model-2");
-      expect(result[0].rank).toBe(1);
-      expect(result[0].percentile).toBe(0);
+      expect(result[0]?.modelId).toBe("model-2");
+      expect(result[0]?.rank).toBe(1);
+      expect(result[0]?.percentile).toBe(0);
 
-      expect(result[1].modelId).toBe("model-1");
-      expect(result[1].rank).toBe(2);
-      expect(result[1].percentile).toBeCloseTo(33.33, 0.1);
+      expect(result[1]?.modelId).toBe("model-1");
+      expect(result[1]?.rank).toBe(2);
+      expect(result[1]?.percentile).toBeCloseTo(33.33, 0.1);
 
-      expect(result[2].modelId).toBe("model-3");
-      expect(result[2].rank).toBe(3);
-      expect(result[2].percentile).toBeCloseTo(66.67, 0.1);
+      expect(result[2]?.modelId).toBe("model-3");
+      expect(result[2]?.rank).toBe(3);
+      expect(result[2]?.percentile).toBeCloseTo(66.67, 0.1);
     });
 
     it("should handle empty scores", () => {
