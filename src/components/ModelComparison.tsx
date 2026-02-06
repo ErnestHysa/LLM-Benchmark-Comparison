@@ -74,7 +74,8 @@ export function ModelComparison({ models, onClose }: ModelComparisonProps) {
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (!modalRef.current) return;
+    const modalElement = modalRef.current;
+    if (!modalElement) return;
 
     // Focus the close button when modal opens
     if (closeButtonRef.current) {
@@ -89,7 +90,7 @@ export function ModelComparison({ models, onClose }: ModelComparisonProps) {
     };
 
     // Trap focus within modal
-    const focusableElements = modalRef.current.querySelectorAll(
+    const focusableElements = modalElement.querySelectorAll(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     );
     const firstElement = focusableElements[0] as HTMLElement;
@@ -114,7 +115,7 @@ export function ModelComparison({ models, onClose }: ModelComparisonProps) {
     };
 
     document.addEventListener("keydown", handleEscape);
-    modalRef.current?.addEventListener("keydown", handleTab);
+    modalElement.addEventListener("keydown", handleTab);
 
     // Prevent body scroll when modal is open
     const originalOverflow = document.body.style.overflow;
@@ -125,9 +126,7 @@ export function ModelComparison({ models, onClose }: ModelComparisonProps) {
       isMountedRef.current = false;
 
       document.removeEventListener("keydown", handleEscape);
-      if (modalRef.current) {
-        modalRef.current.removeEventListener("keydown", handleTab);
-      }
+      modalElement.removeEventListener("keydown", handleTab);
       document.body.style.overflow = originalOverflow;
     };
   }, [handleClose]);
