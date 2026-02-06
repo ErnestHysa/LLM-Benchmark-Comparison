@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 export interface BreadcrumbItem {
   label: string;
   href?: string;
+  current?: boolean;
 }
 
 interface BreadcrumbProps {
