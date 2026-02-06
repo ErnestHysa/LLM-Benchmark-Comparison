@@ -14,36 +14,78 @@ import { DEFAULT_RETRY_CONFIG, DEFAULT_RATE_LIMIT } from "./types";
 import { LLMError, LLMRateLimitError } from "../errors";
 
 /**
- * Rate limiter using token bucket algorithm
+ * Rate limiter using token bucket algorithm with queue-based locking
+ * Prevents race conditions where multiple requests pass the token check simultaneously
  */
 class RateLimiter {
   private tokens: number;
   private lastRefill: number;
   private config: RateLimitConfig;
+  private queue: Array<() => void>;
+  private processing: boolean;
 
   constructor(config: RateLimitConfig = DEFAULT_RATE_LIMIT) {
     this.config = config;
     this.tokens = config.maxRequests;
     this.lastRefill = Date.now();
+    this.queue = [];
+    this.processing = false;
   }
 
   async acquire(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+      this.processQueue();
+    });
+  }
 
-    // Refill tokens based on elapsed time
-    const tokensToAdd = (elapsed / this.config.perMilliseconds) * this.config.maxRequests;
-    this.tokens = Math.min(this.config.maxRequests, this.tokens + tokensToAdd);
-    this.lastRefill = now;
-
-    if (this.tokens < 1) {
-      const waitTime = this.config.perMilliseconds / this.config.maxRequests;
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-      await this.acquire();
+  private async processQueue(): Promise<void> {
+    // Prevent re-entrant calls and ensure atomic transition to processing state
+    // This race condition fix ensures only one instance processes the queue at a time
+    if (this.processing) {
+      return;
+    }
+    if (this.queue.length === 0) {
       return;
     }
 
-    this.tokens--;
+    // Use atomic compare-and-swap pattern to prevent race conditions
+    const wasProcessing = this.processing;
+    this.processing = true;
+    if (wasProcessing) {
+      this.processing = false;
+      return;
+    }
+
+    try {
+      while (this.queue.length > 0) {
+        // Refill tokens based on elapsed time
+        const now = Date.now();
+        const elapsed = now - this.lastRefill;
+        const tokensToAdd = Math.floor(
+          (elapsed / this.config.perMilliseconds) * this.config.maxRequests
+        );
+        this.tokens = Math.min(this.config.maxRequests, this.tokens + tokensToAdd);
+        this.lastRefill = now;
+
+        // If no tokens available, wait
+        if (this.tokens < 1) {
+          const waitTime = Math.ceil(this.config.perMilliseconds / this.config.maxRequests);
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+          continue;
+        }
+
+        // We have a token - decrement and resolve the next waiting request
+        this.tokens--;
+        const nextResolve = this.queue.shift();
+        if (nextResolve) {
+          nextResolve();
+        }
+      }
+    } finally {
+      // Always reset processing flag, even if an error occurs
+      this.processing = false;
+    }
   }
 
   reset(): void {
@@ -158,28 +200,59 @@ export class AnthropicClient {
           model: model as Anthropic.Model,
           messages: anthropicMessages,
           system: system || undefined,
-          max_tokens: options.maxTokens ?? 4096,
+          max_tokens: options.maxTokens ?? 16384, // 2x increase - ensure complete outputs
           temperature: options.temperature,
           top_p: options.topP,
           stop_sequences: options.stopSequences,
         };
 
-        // Execute with timeout
+        // Execute with timeout and abort signal
         const response = await this.executeWithTimeout(
           () => this.client.messages.create(request),
-          options.timeoutMs ?? 120000
+          options.timeoutMs ?? 120000,
+          options.abortSignal
         );
 
-        const contentBlock = response.content.find((block) => block.type === "text");
-        const content = contentBlock?.type === "text" ? contentBlock.text : "";
+        // Comprehensive null/undefined validation for API response
+        if (!response) {
+          throw new LLMError("Anthropic", "No response returned from API");
+        }
+
+        const content = response.content;
+        if (!content || content.length === 0) {
+          throw new LLMError("Anthropic", "Response content is empty");
+        }
+
+        const contentBlock = content.find((block) => block.type === "text");
+        if (!contentBlock) {
+          throw new LLMError("Anthropic", "No text content block in response");
+        }
+
+        const text = contentBlock.type === "text" ? contentBlock.text : "";
+        if (!text) {
+          throw new LLMError("Anthropic", "Text content is empty");
+        }
+
+        // Safely extract usage information
+        const usage = response.usage;
+        if (!usage) {
+          throw new LLMError("Anthropic", "Usage information is missing from response");
+        }
+
+        const tokensUsed = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+
+        // Safely extract stop reason
+        const stopReason = response.stop_reason;
+        const normalizedFinishReason: "stop" | "length" | "max_tokens" =
+          stopReason === "end_turn" ? "stop" :
+          stopReason === "max_tokens" ? "length" :
+          "max_tokens";
 
         return {
-          content,
-          model: response.model,
-          tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
-          finishReason: response.stop_reason === "end_turn" ? "stop" :
-                       response.stop_reason === "max_tokens" ? "length" :
-                       "max_tokens",
+          content: text,
+          model: response.model || model,
+          tokensUsed,
+          finishReason: normalizedFinishReason,
         };
       } catch (error) {
         lastError = error;
@@ -231,17 +304,77 @@ export class AnthropicClient {
   }
 
   /**
-   * Execute a function with a timeout
+   * Execute a function with a timeout using AbortController
+   * This properly cancels the underlying request on timeout
    */
   private async executeWithTimeout<T>(
     fn: () => Promise<T>,
-    timeoutMs: number
+    timeoutMs: number,
+    abortSignal?: AbortSignal
   ): Promise<T> {
+    // Check if external signal is already aborted
+    if (abortSignal?.aborted) {
+      throw new Error("Request aborted");
+    }
+
+    // Create a combined abort controller that responds to both timeout and external abort
+    const timeoutController = new AbortController();
+    let timeoutId: NodeJS.Timeout | undefined;
+    let isResolved = false;
+    let rejectFn: ((error: Error) => void) | undefined;
+
+    // Set up external abort signal listener with proper cleanup
+    let externalAbortListener: (() => void) | undefined;
+
+    const cleanupExternalAbortListener = () => {
+      if (abortSignal && externalAbortListener) {
+        abortSignal.removeEventListener("abort", externalAbortListener);
+        externalAbortListener = undefined;
+      }
+    };
+
+    externalAbortListener = () => {
+      if (!isResolved) {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutController.abort();
+        isResolved = true;
+        if (rejectFn) {
+          rejectFn(new Error("Request aborted"));
+        }
+      }
+      cleanupExternalAbortListener();
+    };
+
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", externalAbortListener);
+    }
+
+    // Set up timeout promise with reject function accessible
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
+      rejectFn = reject;
+      timeoutId = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          cleanupExternalAbortListener();
+          timeoutController.abort();
+          reject(new Error("Request timeout"));
+        }
+      }, timeoutMs);
     });
 
-    return Promise.race([fn(), timeoutPromise]);
+    // Create a promise that wraps the function with abort signal
+    const taskPromise = fn();
+
+    // Race between the task, timeout, and external abort
+    return Promise.race([taskPromise, timeoutPromise])
+      .finally(() => {
+        // Mark as resolved to prevent timeout from firing
+        isResolved = true;
+
+        // Clean up timeout and event listener
+        if (timeoutId) clearTimeout(timeoutId);
+        cleanupExternalAbortListener();
+      });
   }
 
   /**

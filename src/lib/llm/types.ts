@@ -15,6 +15,7 @@ export interface LLMRequestOptions {
   topP?: number;
   stopSequences?: string[];
   timeoutMs?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface LLMResponse {

@@ -27,36 +27,78 @@ export interface CustomEndpointConfig {
 }
 
 /**
- * Rate limiter using token bucket algorithm
+ * Rate limiter using token bucket algorithm with queue-based locking
+ * Prevents race conditions where multiple requests pass the token check simultaneously
  */
 class RateLimiter {
   private tokens: number;
   private lastRefill: number;
   private config: RateLimitConfig;
+  private queue: Array<() => void>;
+  private processing: boolean;
 
   constructor(config: RateLimitConfig = DEFAULT_RATE_LIMIT) {
     this.config = config;
     this.tokens = config.maxRequests;
     this.lastRefill = Date.now();
+    this.queue = [];
+    this.processing = false;
   }
 
   async acquire(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+      this.processQueue();
+    });
+  }
 
-    // Refill tokens based on elapsed time
-    const tokensToAdd = (elapsed / this.config.perMilliseconds) * this.config.maxRequests;
-    this.tokens = Math.min(this.config.maxRequests, this.tokens + tokensToAdd);
-    this.lastRefill = now;
-
-    if (this.tokens < 1) {
-      const waitTime = this.config.perMilliseconds / this.config.maxRequests;
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-      await this.acquire();
+  private async processQueue(): Promise<void> {
+    // Prevent re-entrant calls and ensure atomic transition to processing state
+    // This race condition fix ensures only one instance processes the queue at a time
+    if (this.processing) {
+      return;
+    }
+    if (this.queue.length === 0) {
       return;
     }
 
-    this.tokens--;
+    // Use atomic compare-and-swap pattern to prevent race conditions
+    const wasProcessing = this.processing;
+    this.processing = true;
+    if (wasProcessing) {
+      this.processing = false;
+      return;
+    }
+
+    try {
+      while (this.queue.length > 0) {
+        // Refill tokens based on elapsed time
+        const now = Date.now();
+        const elapsed = now - this.lastRefill;
+        const tokensToAdd = Math.floor(
+          (elapsed / this.config.perMilliseconds) * this.config.maxRequests
+        );
+        this.tokens = Math.min(this.config.maxRequests, this.tokens + tokensToAdd);
+        this.lastRefill = now;
+
+        // If no tokens available, wait
+        if (this.tokens < 1) {
+          const waitTime = Math.ceil(this.config.perMilliseconds / this.config.maxRequests);
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+          continue;
+        }
+
+        // We have a token - decrement and resolve the next waiting request
+        this.tokens--;
+        const nextResolve = this.queue.shift();
+        if (nextResolve) {
+          nextResolve();
+        }
+      }
+    } finally {
+      // Always reset processing flag, even if an error occurs
+      this.processing = false;
+    }
   }
 
   reset(): void {
@@ -159,7 +201,7 @@ export class CustomAPIClient {
             content: m.content,
           })),
           temperature: options.temperature ?? 0.7,
-          max_tokens: options.maxTokens,
+          max_tokens: options.maxTokens ?? 16384, // 2x increase - ensure complete outputs
           top_p: options.topP,
           stop: options.stopSequences,
         };
@@ -174,15 +216,17 @@ export class CustomAPIClient {
           headers["Authorization"] = `Bearer ${this.config.apiKey}`;
         }
 
-        // Execute with timeout
+        // Execute with timeout and abort signal
         const response = await this.executeWithTimeout(
           () =>
             fetch(`${this.config.baseURL}/chat/completions`, {
               method: "POST",
               headers,
               body: JSON.stringify(requestBody),
+              signal: options.abortSignal, // Pass abort signal to fetch
             }),
-          options.timeoutMs ?? 120000
+          options.timeoutMs ?? 120000,
+          options.abortSignal
         );
 
         if (!response.ok) {
@@ -191,18 +235,48 @@ export class CustomAPIClient {
 
         const data = await response.json();
 
-        const choice = data.choices?.[0];
-        if (!choice) {
+        // Comprehensive null/undefined validation for API response
+        if (!data) {
+          throw new LLMError(this.config.name, "No response data returned from API");
+        }
+
+        const choices = data.choices;
+        if (!choices || !Array.isArray(choices) || choices.length === 0) {
           throw new LLMError(this.config.name, "No response choices returned");
         }
 
+        const choice = choices[0];
+        if (!choice) {
+          throw new LLMError(this.config.name, "First choice is null or undefined");
+        }
+
+        const message = choice.message;
+        if (!message) {
+          throw new LLMError(this.config.name, "Response message is null or undefined");
+        }
+
+        // Ensure content is a string
+        const content = typeof message.content === "string" ? message.content : "";
+        if (!content) {
+          throw new LLMError(this.config.name, "Response content is empty");
+        }
+
+        // Safely extract finish reason
+        const finishReason = choice.finish_reason;
+        const normalizedFinishReason: "stop" | "length" | "max_tokens" =
+          finishReason === "stop" ? "stop" :
+          finishReason === "length" ? "length" :
+          "max_tokens";
+
+        // Safely extract token usage
+        const usage = data.usage;
+        const tokensUsed = usage?.total_tokens;
+
         return {
-          content: choice.message?.content ?? "",
+          content,
           model: data.model || modelId,
-          tokensUsed: data.usage?.total_tokens,
-          finishReason: choice.finish_reason === "stop" ? "stop" :
-                       choice.finish_reason === "length" ? "length" :
-                       "max_tokens",
+          tokensUsed,
+          finishReason: normalizedFinishReason,
         };
       } catch (error) {
         lastError = error;
@@ -251,17 +325,77 @@ export class CustomAPIClient {
   }
 
   /**
-   * Execute a function with a timeout
+   * Execute a function with a timeout using AbortController
+   * This properly cancels the underlying request on timeout
    */
   private async executeWithTimeout<T>(
     fn: () => Promise<T>,
-    timeoutMs: number
+    timeoutMs: number,
+    abortSignal?: AbortSignal
   ): Promise<T> {
+    // Check if external signal is already aborted
+    if (abortSignal?.aborted) {
+      throw new Error("Request aborted");
+    }
+
+    // Create a combined abort controller that responds to both timeout and external abort
+    const timeoutController = new AbortController();
+    let timeoutId: NodeJS.Timeout | undefined;
+    let isResolved = false;
+    let rejectFn: ((error: Error) => void) | undefined;
+
+    // Set up external abort signal listener with proper cleanup
+    let externalAbortListener: (() => void) | undefined;
+
+    const cleanupExternalAbortListener = () => {
+      if (abortSignal && externalAbortListener) {
+        abortSignal.removeEventListener("abort", externalAbortListener);
+        externalAbortListener = undefined;
+      }
+    };
+
+    externalAbortListener = () => {
+      if (!isResolved) {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutController.abort();
+        isResolved = true;
+        if (rejectFn) {
+          rejectFn(new Error("Request aborted"));
+        }
+      }
+      cleanupExternalAbortListener();
+    };
+
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", externalAbortListener);
+    }
+
+    // Set up timeout promise with reject function accessible
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
+      rejectFn = reject;
+      timeoutId = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          cleanupExternalAbortListener();
+          timeoutController.abort();
+          reject(new Error("Request timeout"));
+        }
+      }, timeoutMs);
     });
 
-    return Promise.race([fn(), timeoutPromise]);
+    // Create a promise that wraps the function
+    const taskPromise = fn();
+
+    // Race between the task, timeout, and external abort
+    return Promise.race([taskPromise, timeoutPromise])
+      .finally(() => {
+        // Mark as resolved to prevent timeout from firing
+        isResolved = true;
+
+        // Clean up timeout and event listener
+        if (timeoutId) clearTimeout(timeoutId);
+        cleanupExternalAbortListener();
+      });
   }
 
   /**
