@@ -32,7 +32,19 @@ export default function SettingsPage() {
 
   // Load settings on mount (client-side only)
   useEffect(() => {
+    // Load settings from localStorage
     setSettings(SettingsManager.getSettings());
+
+    // Load custom models from database (for persistence)
+    SettingsManager.loadCustomModelsFromDatabase().then((loaded) => {
+      if (loaded) {
+        // Reload settings after loading from database
+        setSettings(SettingsManager.getSettings());
+      }
+    }).catch((err) => {
+      console.error("[Settings Page] Failed to load custom models from database:", err);
+    });
+
     setMounted(true);
   }, []);
 

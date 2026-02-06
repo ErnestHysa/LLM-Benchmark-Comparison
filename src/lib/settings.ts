@@ -95,6 +95,7 @@ export const PreferencesSchema = z.object({
   concurrency: z.number().min(1).max(10).default(5),
   timeoutEnabled: z.boolean().default(true),
   timeoutSec: z.number().min(60).max(3600).default(600),
+  maxTokens: z.number().min(256).max(32000).default(8192),
   exportFormat: ExportFormatEnum.default("csv"),
   includeMetrics: z.boolean().default(true),
   includeExplanations: z.boolean().default(true),
@@ -121,6 +122,7 @@ export const SettingsSchema = z.object({
     concurrency: 5,
     timeoutEnabled: true,
     timeoutSec: 600,
+    maxTokens: 8192,
     exportFormat: "csv",
     includeMetrics: true,
     includeExplanations: true,
@@ -148,6 +150,7 @@ export const DEFAULT_SETTINGS: Settings = {
     concurrency: 5,
     timeoutEnabled: true,
     timeoutSec: 600,
+    maxTokens: 8192,
     exportFormat: "csv",
     includeMetrics: true,
     includeExplanations: true,
@@ -326,6 +329,12 @@ export class SettingsManager {
     };
     settings.models.push(newModel);
     this.saveSettings(settings);
+
+    // Sync to database for persistence
+    this.syncCustomModelsToDatabase().catch((err) => {
+      console.error("[SettingsManager] Failed to sync new custom model to database:", err);
+    });
+
     return newModel;
   }
 
@@ -339,6 +348,12 @@ export class SettingsManager {
 
     settings.models[index] = { ...settings.models[index], ...updates } as CustomModel;
     this.saveSettings(settings);
+
+    // Sync to database for persistence
+    this.syncCustomModelsToDatabase().catch((err) => {
+      console.error("[SettingsManager] Failed to sync updated custom model to database:", err);
+    });
+
     return true;
   }
 
@@ -435,5 +450,93 @@ export class SettingsManager {
     localStorage.removeItem(MODELS_KEY);
     localStorage.removeItem(EVALUATOR_KEY);
     localStorage.removeItem(PREFERENCES_KEY);
+  }
+
+  /**
+   * Sync custom models to database for persistence
+   * Call this when adding/updating custom models to ensure they're saved
+   */
+  static async syncCustomModelsToDatabase(): Promise<boolean> {
+    if (typeof window === "undefined") return false;
+
+    try {
+      const settings = this.getSettings();
+      const customModels = settings.models.filter((m) => m.isCustom);
+
+      if (customModels.length === 0) {
+        console.info("[SettingsManager] No custom models to sync");
+        return true;
+      }
+
+      const response = await fetch("/api/custom-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ models: customModels }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.info("[SettingsManager] Synced custom models to database:", data);
+        return true;
+      } else {
+        console.error("[SettingsManager] Failed to sync custom models:", await response.text());
+        return false;
+      }
+    } catch (error) {
+      console.error("[SettingsManager] Error syncing custom models:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Load custom models from database
+   * Useful for restoring models after clearing localStorage
+   */
+  static async loadCustomModelsFromDatabase(): Promise<boolean> {
+    if (typeof window === "undefined") return false;
+
+    try {
+      const response = await fetch("/api/custom-models");
+      if (!response.ok) return false;
+
+      const data = await response.json();
+      const dbModels = data.models || [];
+
+      if (dbModels.length === 0) {
+        console.info("[SettingsManager] No custom models in database");
+        return true;
+      }
+
+      // Merge with existing settings
+      const settings = this.getSettings();
+      const existingIds = new Set(settings.models.map((m) => m.id));
+
+      let addedCount = 0;
+      for (const dbModel of dbModels) {
+        // Only add if not already in localStorage
+        if (!existingIds.has(dbModel.id)) {
+          settings.models.push({
+            id: dbModel.id,
+            name: dbModel.providerId, // For custom models, name = providerId
+            displayName: dbModel.displayName || dbModel.name,
+            provider: dbModel.provider,
+            description: dbModel.description,
+            isEnabled: dbModel.isEnabled ?? true,
+            isCustom: true,
+          });
+          addedCount++;
+        }
+      }
+
+      if (addedCount > 0) {
+        this.saveSettings(settings);
+        console.info(`[SettingsManager] Loaded ${addedCount} custom models from database`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error("[SettingsManager] Error loading custom models:", error);
+      return false;
+    }
   }
 }

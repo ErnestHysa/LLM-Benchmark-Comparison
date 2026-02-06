@@ -191,6 +191,38 @@ export function Preferences({ preferences, onUpdate }: PreferencesProps) {
         </CardContent>
       </Card>
 
+      {/* Token Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Response Limits</CardTitle>
+          <CardDescription>Maximum tokens for model responses</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="maxTokens">
+              Max Tokens: {localPrefs.maxTokens?.toLocaleString() || 8192}
+            </Label>
+            <Input
+              id="maxTokens"
+              type="number"
+              min="256"
+              max="32000"
+              step="256"
+              value={localPrefs.maxTokens || 8192}
+              onChange={(e) =>
+                setLocalPrefs({
+                  ...localPrefs,
+                  maxTokens: parseInt(e.target.value) || 8192,
+                })
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Maximum number of tokens for model responses (256-32000). Higher values allow longer responses but cost more.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Export Settings */}
       <Card>
         <CardHeader>
