@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect } from "react";
 
 export type ToastVariant = "default" | "success" | "error" | "warning" | "info";
 
@@ -82,14 +82,14 @@ export const toastInfo = (description: string, title?: string) => {
 export function useToast() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  useCallback(() => {
+  useEffect(() => {
     globalListeners.add(setToasts);
     setToasts(globalToasts);
 
     return () => {
       globalListeners.delete(setToasts);
     };
-  }, [setToasts]);
+  }, []);
 
   return {
     toasts,

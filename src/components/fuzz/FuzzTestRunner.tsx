@@ -44,7 +44,7 @@ function ModelSelector({ models, selected, onChange }: ModelCheckboxProps) {
       {models.map((model) => (
         <label
           key={model}
-          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+          className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
             selected.includes(model)
               ? "border-primary bg-primary/10"
               : "border-border hover:border-primary/50"
@@ -54,7 +54,7 @@ function ModelSelector({ models, selected, onChange }: ModelCheckboxProps) {
             type="checkbox"
             checked={selected.includes(model)}
             onChange={() => toggleModel(model)}
-            className="w-4 h-4"
+            className="h-4 w-4"
           />
           <span className="flex-1 text-sm">{model}</span>
         </label>
@@ -68,19 +68,53 @@ const CATEGORIES = [
   { value: "injection", label: "Injections", description: "Prompt injection attempts" },
   { value: "jailbreak", label: "Jailbreaks", description: "DAN, developer mode, etc." },
   { value: "edge_case", label: "Edge Cases", description: "Empty, unicode, emojis" },
-  { value: "format_violation", label: "Format Violations", description: "Markdown, JSON, XML injection" },
+  {
+    value: "format_violation",
+    label: "Format Violations",
+    description: "Markdown, JSON, XML injection",
+  },
 ];
+type FuzzCategory = (typeof CATEGORIES)[number]["value"];
 
 interface FuzzTestRunnerProps {
   models: string[];
 }
 
+interface VulnerabilityResult {
+  category: string;
+  passed: boolean;
+}
+
+interface FuzzResultItem {
+  modelId: string;
+  overallScore: number;
+  passed: number;
+  failed: number;
+  vulnerabilities: VulnerabilityResult[];
+}
+
+interface FuzzResultsState {
+  runId: string;
+  completed: boolean;
+  data: {
+    results?: {
+      byModel?: Record<string, { total: number; passed: number; failed: number }>;
+    };
+  } | null;
+  error?: string;
+}
+
 export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
-  const [prompt, setPrompt] = useState("Write a function to sort an array of integers in ascending order.");
+  const [prompt, setPrompt] = useState(
+    "Write a function to sort an array of integers in ascending order."
+  );
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(["typo", "injection"]);
+  const [selectedCategories, setSelectedCategories] = useState<FuzzCategory[]>([
+    "typo",
+    "injection",
+  ]);
   const [running, setRunning] = useState(false);
-  const [results, setResults] = useState<any>(null);
+  const [results, setResults] = useState<FuzzResultsState | null>(null);
 
   // Ref to track the current polling interval for cleanup
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -95,7 +129,7 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
     };
   }, []);
 
-  const toggleCategory = (cat: string) => {
+  const toggleCategory = (cat: FuzzCategory) => {
     if (selectedCategories.includes(cat)) {
       setSelectedCategories(selectedCategories.filter((c) => c !== cat));
     } else {
@@ -119,7 +153,9 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
     const activeApiKeys = allApiKeys.filter((k) => k.isActive);
 
     if (activeApiKeys.length === 0) {
-      alert("No active API keys found. Please add and activate API keys in Settings before running fuzz tests.");
+      alert(
+        "No active API keys found. Please add and activate API keys in Settings before running fuzz tests."
+      );
       return;
     }
 
@@ -131,7 +167,9 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
 
     if (invalidKeys.length > 0) {
       const providers = invalidKeys.map((k) => k.provider).join(", ");
-      alert(`Invalid or missing API keys for: ${providers}. Please check your Settings and ensure API keys are properly configured.`);
+      alert(
+        `Invalid or missing API keys for: ${providers}. Please check your Settings and ensure API keys are properly configured.`
+      );
       return;
     }
 
@@ -139,12 +177,15 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
     setResults(null);
 
     // Gather API keys for providers
-    const apiKeys = activeApiKeys.reduce((acc, key) => {
-      // Decode and add to apiKeys object
-      const provider = key.provider.toLowerCase();
-      acc[provider] = decodeApiKey(key.key);
-      return acc;
-    }, {} as Record<string, string>);
+    const apiKeys = activeApiKeys.reduce(
+      (acc, key) => {
+        // Decode and add to apiKeys object
+        const provider = key.provider.toLowerCase();
+        acc[provider] = decodeApiKey(key.key);
+        return acc;
+      },
+      {} as Record<string, string>
+    );
 
     try {
       const response = await fetch("/api/fuzz/run", {
@@ -153,7 +194,7 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
         body: JSON.stringify({
           prompt,
           modelIds: selectedModels,
-          categories: selectedCategories as any,
+          categories: selectedCategories,
           apiKeys,
         }),
       });
@@ -212,11 +253,13 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
                 data: resultsData,
               });
             } else {
-              // Fallback to mock results with notification
+              const errorData = await resultsResponse.json().catch(() => null);
+              const message = errorData?.error?.message || "Failed to load detailed fuzz results.";
               setResults({
                 runId,
                 completed: true,
-                mockResults: generateMockResults(selectedModels, selectedCategories),
+                data: null,
+                error: message,
               });
             }
           } else if (data.run.status === "FAILED") {
@@ -230,27 +273,15 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
         console.error("Polling error:", error);
         // If polling fails repeatedly, don't keep polling forever
         if (pollCount % 10 === 0) {
-          console.warn(`Fuzz test polling: ${pollCount} attempts, ${Math.round(elapsed / 1000)}s elapsed`);
+          console.warn(
+            `Fuzz test polling: ${pollCount} attempts, ${Math.round(elapsed / 1000)}s elapsed`
+          );
         }
       }
     }, POLL_INTERVAL_MS); // Poll every 3 seconds
 
     // Store interval ref for cleanup
     pollingIntervalRef.current = poll;
-  };
-
-  // Mock results generator for demo
-  const generateMockResults = (models: string[], categories: string[]) => {
-    return models.map((model) => ({
-      modelId: model,
-      overallScore: Math.floor(Math.random() * 30) + 70,
-      passed: Math.floor(Math.random() * 40) + 10,
-      failed: Math.floor(Math.random() * 5),
-      vulnerabilities: categories.map((cat) => ({
-        category: cat,
-        passed: Math.random() > 0.3,
-      })),
-    }));
   };
 
   const getScoreColor = (score: number) => {
@@ -265,10 +296,27 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
     return "bg-error/10";
   };
 
+  const displayResults: FuzzResultItem[] = results?.data?.results?.byModel
+    ? Object.entries(results.data.results.byModel).map(([modelId, modelStats]) => {
+        const total = modelStats.total || 0;
+        const passed = modelStats.passed || 0;
+        const failed = modelStats.failed || 0;
+        const overallScore = total > 0 ? Math.round((passed / total) * 100) : 0;
+
+        return {
+          modelId,
+          overallScore,
+          passed,
+          failed,
+          vulnerabilities: [],
+        };
+      })
+    : [];
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       {/* Configuration */}
-      <div className="lg:col-span-2 space-y-6">
+      <div className="space-y-6 lg:col-span-2">
         <Card>
           <CardHeader>
             <CardTitle>Test Configuration</CardTitle>
@@ -290,7 +338,7 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
             {/* Models */}
             <div>
               <Label>Models to Test ({selectedModels.length} selected)</Label>
-              <div className="mt-2 max-h-48 overflow-y-auto p-3 bg-muted rounded-lg">
+              <div className="mt-2 max-h-48 overflow-y-auto rounded-lg bg-muted p-3">
                 <ModelSelector
                   models={models}
                   selected={selectedModels}
@@ -302,11 +350,11 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
             {/* Categories */}
             <div>
               <Label>Test Categories</Label>
-              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
                 {CATEGORIES.map((cat) => (
                   <label
                     key={cat.value}
-                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                       selectedCategories.includes(cat.value)
                         ? "border-primary bg-primary/10"
                         : "border-border hover:border-primary/50"
@@ -316,10 +364,10 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
                       type="checkbox"
                       checked={selectedCategories.includes(cat.value)}
                       onChange={() => toggleCategory(cat.value)}
-                      className="w-4 h-4 mt-0.5"
+                      className="mt-0.5 h-4 w-4"
                     />
                     <div>
-                      <span className="font-medium text-sm">{cat.label}</span>
+                      <span className="text-sm font-medium">{cat.label}</span>
                       <p className="text-xs text-muted-foreground">{cat.description}</p>
                     </div>
                   </label>
@@ -328,20 +376,15 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
             </div>
 
             {/* Run Button */}
-            <Button
-              onClick={runFuzzTest}
-              disabled={running}
-              className="w-full"
-              size="lg"
-            >
+            <Button onClick={runFuzzTest} disabled={running} className="w-full" size="lg">
               {running ? (
                 <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                   Running Tests...
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4 mr-2" />
+                  <Play className="mr-2 h-4 w-4" />
                   Run Fuzz Tests
                 </>
               )}
@@ -356,12 +399,22 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
               <CardTitle>Test Results</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {results.mockResults.map((result: any) => (
+              {results.error && (
+                <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                  {results.error}
+                </div>
+              )}
+              {displayResults.length === 0 && !results.error && (
+                <div className="text-sm text-muted-foreground">
+                  No model-level result breakdown is available for this run.
+                </div>
+              )}
+              {displayResults.map((result) => (
                 <div
                   key={result.modelId}
-                  className={`p-4 rounded-lg ${getScoreBg(result.overallScore)}`}
+                  className={`rounded-lg p-4 ${getScoreBg(result.overallScore)}`}
                 >
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="mb-3 flex items-center justify-between">
                     <h4 className="font-semibold">{result.modelId}</h4>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className={getScoreColor(result.overallScore)}>
@@ -372,21 +425,23 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
                       </span>
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    {result.vulnerabilities.map((vuln: any) => (
-                      <div
-                        key={vuln.category}
-                        className="flex items-center justify-between text-sm p-2 bg-background rounded"
-                      >
-                        <span className="capitalize">{vuln.category.replace("_", " ")}</span>
-                        {vuln.passed ? (
-                          <CheckCircle2 className="h-4 w-4 text-success" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-error" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  {result.vulnerabilities.length > 0 && (
+                    <div className="space-y-2">
+                      {result.vulnerabilities.map((vuln) => (
+                        <div
+                          key={vuln.category}
+                          className="flex items-center justify-between rounded bg-background p-2 text-sm"
+                        >
+                          <span className="capitalize">{vuln.category.replace("_", " ")}</span>
+                          {vuln.passed ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-error" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </CardContent>
@@ -403,10 +458,10 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
               What is Fuzz Testing?
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-3">
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
             <p>
-              Fuzz testing systematically tests model robustness by sending
-              adversarial or malformed inputs to see if the model behaves correctly.
+              Fuzz testing systematically tests model robustness by sending adversarial or malformed
+              inputs to see if the model behaves correctly.
             </p>
             <div className="space-y-2">
               <p className="font-medium text-foreground">Tests include:</p>
@@ -436,7 +491,7 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
           <CardHeader>
             <CardTitle>Robustness Score</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-2">
+          <CardContent className="space-y-2 text-sm text-muted-foreground">
             <div className="flex items-center justify-between">
               <span>90-100</span>
               <Badge className="bg-success/10 text-success">Excellent</Badge>
