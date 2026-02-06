@@ -7,6 +7,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { ScoreCard, BenchmarkCard, PerformanceChart } from "@/components/dashboard";
+import type { DataPoint } from "@/components/dashboard/PerformanceChart";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { BarChart3, Clock, Trophy, TrendingUp } from "lucide-react";
@@ -156,10 +157,10 @@ async function getDashboardData() {
       .slice(0, 4)
       .map(([modelId]) => modelId);
 
-    const chartData = sortedWeeks.map((weekKey) => {
+    const chartData: DataPoint[] = sortedWeeks.map((weekKey) => {
       const weekModels =
         weekBuckets.get(weekKey) || new Map<string, { total: number; count: number }>();
-      const row: Record<string, string | number> = { date: weekKey };
+      const row: DataPoint = { date: weekKey };
 
       for (const modelId of chartModels) {
         const stats = weekModels.get(modelId);
@@ -190,7 +191,7 @@ async function getDashboardData() {
       recentRuns: [],
       averageScores: [],
       recentBenchmarks: [],
-      chartData: [],
+      chartData: [] as DataPoint[],
       chartModels: [],
     };
   }
