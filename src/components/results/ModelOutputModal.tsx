@@ -2,22 +2,22 @@
  * Model Output Modal Component
  *
  * Displays the full model output with syntax highlighting for code
+ * Full-screen modal to handle long outputs without cutting off
  */
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Copy, Check, Code, FileText } from "lucide-react";
+import { Copy, Check, Code, FileText, X, Maximize2, Minimize2 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import {
   vscDarkPlus,
@@ -178,8 +178,15 @@ function detectLanguage(content: string): Language {
     return "sql";
   }
 
-  if (trimmed.startsWith("<html") || trimmed.startsWith("<div")) {
+  if (trimmed.startsWith("<html") || trimmed.startsWith("<div") || trimmed.startsWith("<!DOCTYPE")) {
     return "html";
+  }
+
+  if (trimmed.startsWith("<style") || trimmed.includes("}")) {
+    // Check for CSS patterns
+    if (trimmed.includes("{") && trimmed.includes("}") && trimmed.includes(":")) {
+      return "css";
+    }
   }
 
   if (trimmed.startsWith("# ")) {
@@ -234,13 +241,42 @@ export function ModelOutputModal({
   error,
 }: ModelOutputModalProps) {
   const [copied, setCopied] = useState(false);
-  const { formatted, language } = formatOutput(output);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
+
+  const { formatted, language } = formatOutput(output || "");
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(output);
+      await navigator.clipboard.writeText(output || "");
+      if (!isMountedRef.current) return;
+
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+
+      // Clear any existing timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+
+      // Set new timeout with proper cleanup
+      timeoutRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setCopied(false);
+        }
+      }, 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
     }
@@ -248,15 +284,23 @@ export function ModelOutputModal({
 
   const isCode = language !== "text" && language !== "markdown";
   const hasError = status === "FAILED" || error;
+  const hasContent = output && output.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh]">
-        <DialogHeader>
+      <DialogContent
+        className={cn(
+          "max-h-[90vh] flex flex-col",
+          isFullscreen ? "w-screen h-screen max-w-none rounded-none mx-0" : "max-w-6xl w-[calc(100vw-2rem)] sm:w-[95vw]"
+        )}
+      >
+        <DialogHeader className="flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                {isCode ? (
+                {hasError ? (
+                  <FileText className="h-5 w-5 text-error" />
+                ) : isCode ? (
                   <Code className="h-5 w-5 text-primary" />
                 ) : (
                   <FileText className="h-5 w-5 text-primary" />
@@ -264,7 +308,8 @@ export function ModelOutputModal({
               </div>
               <div>
                 <DialogTitle className="text-lg">{modelId}</DialogTitle>
-                <DialogDescription className="flex items-center gap-2 mt-1">
+                {/* Use div instead of DialogDescription (which renders <p>) to avoid hydration error with nested <div> from Badge */}
+                <div className="flex items-center gap-2 mt-1 flex-wrap text-sm text-muted-foreground">
                   <Badge
                     variant="outline"
                     className={cn(
@@ -277,45 +322,88 @@ export function ModelOutputModal({
                     {language}
                   </Badge>
                   <span className="text-xs text-muted-foreground">
-                    {output.length} characters
+                    {output?.length || 0} characters
                   </span>
-                </DialogDescription>
+                  {output && (
+                    <span className="text-xs text-muted-foreground">
+                      {output.split("\n").length} lines
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCopy}
-              className="gap-2"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-4 w-4" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy className="h-4 w-4" />
-                  Copy
-                </>
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsFullscreen(!isFullscreen)}
+                title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCopy}
+                className="gap-2"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4" />
+                    Copy
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenChange(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </DialogHeader>
 
-        <div className="mt-4">
-          {hasError ? (
-            <div className="p-4 bg-error/10 border border-error/20 rounded-lg">
-              <p className="text-error font-medium mb-2">Error Output</p>
-              <p className="text-sm text-error/80 whitespace-pre-wrap">
-                {error || output || "No output available"}
-              </p>
+        {/* Main content area with flexible height */}
+        <div className="flex-1 min-h-0 flex flex-col mt-4">
+          {!hasContent && !hasError ? (
+            <div className="flex-1 flex items-center justify-center text-center text-muted-foreground p-8">
+              <div>
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No output available</p>
+                <p className="text-sm mt-2">
+                  {status === "PENDING" || status === "RUNNING"
+                    ? "This model is still being evaluated..."
+                    : "This model run produced no output."}
+                </p>
+              </div>
             </div>
-          ) : output ? (
-            <ScrollArea className="h-[50vh] rounded-lg border border-border">
+          ) : hasError ? (
+            <ScrollArea className="flex-1 rounded-lg border border-border">
               <div className="p-4">
+                <div className="bg-error/10 border border-error/20 rounded-lg p-4">
+                  <p className="text-error font-medium mb-2">Error Output</p>
+                  <pre className="text-sm text-error/80 whitespace-pre-wrap break-words">
+                    {error || output || "No error details available"}
+                  </pre>
+                </div>
+              </div>
+            </ScrollArea>
+          ) : (
+            <ScrollArea className="flex-1 rounded-lg border border-border">
+              <div className="p-4 min-h-full">
                 {isCode ? (
-                  <div className="rounded-md overflow-hidden">
+                  <div className="rounded-md overflow-hidden bg-[#1e1e1e]">
                     <SyntaxHighlighter
                       language={language}
                       style={vscDarkPlus}
@@ -323,39 +411,35 @@ export function ModelOutputModal({
                         margin: 0,
                         borderRadius: "0.375rem",
                         fontSize: "0.875rem",
-                        lineHeight: "1.5",
+                        lineHeight: "1.6",
+                        background: "#1e1e1e",
                       }}
                       showLineNumbers
-                      wrapLongLines
+                      wrapLongLines={true}
+                      lineNumberStyle={{
+                        color: "#858585",
+                        fontSize: "0.75rem",
+                        minWidth: "3em",
+                      }}
                     >
                       {formatted}
                     </SyntaxHighlighter>
                   </div>
                 ) : (
-                  <pre className="whitespace-pre-wrap break-words text-sm font-mono">
+                  <pre className="whitespace-pre-wrap break-words text-sm font-mono text-foreground">
                     {formatted}
                   </pre>
                 )}
               </div>
             </ScrollArea>
-          ) : (
-            <div className="p-8 text-center text-muted-foreground">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No output available</p>
-              <p className="text-sm mt-2">
-                {status === "PENDING" || status === "RUNNING"
-                  ? "This model is still being evaluated..."
-                  : "This model run produced no output."}
-              </p>
-            </div>
           )}
         </div>
 
-        {/* Footer actions */}
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <p>
+        {/* Footer - fixed at bottom */}
+        <div className="flex-shrink-0 flex items-center justify-between text-sm text-muted-foreground pt-4 mt-4 border-t border-border">
+          <p className="text-xs">
             {isCode
-              ? "Code syntax highlighting enabled"
+              ? "Code syntax highlighting enabled - Line wraps enabled"
               : "Plain text output"}
           </p>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>

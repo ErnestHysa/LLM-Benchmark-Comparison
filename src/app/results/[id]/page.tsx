@@ -59,7 +59,13 @@ async function getBenchmarkRun(id: string) {
         },
       },
       modelRuns: {
-        include: {
+        select: {
+          id: true,
+          modelId: true,
+          status: true,
+          output: true,
+          tokensUsed: true,
+          cost: true,
           categoryScores: {
             include: {
               category: {
@@ -68,7 +74,11 @@ async function getBenchmarkRun(id: string) {
             },
           },
           scores: {
-            include: {
+            select: {
+              id: true,
+              categoryId: true,
+              value: true,
+              aiConfidence: true,
               category: {
                 select: { id: true, name: true },
               },
@@ -76,7 +86,9 @@ async function getBenchmarkRun(id: string) {
                 select: { id: true, name: true, weight: true },
               },
               metricScores: {
-                include: {
+                select: {
+                  value: true,
+                  explanation: true,
                   metric: {
                     select: {
                       name: true,
@@ -106,9 +118,25 @@ const categoryColors: Record<string, string> = {
 };
 
 function getScoreColor(score: number): string {
-  if (score >= 80) return "text-success";
-  if (score >= 60) return "text-warning";
+  // Guard against NaN or invalid scores
+  const validScore = Number.isFinite(score) ? score : 0;
+  if (validScore >= 80) return "text-success";
+  if (validScore >= 60) return "text-warning";
   return "text-error";
+}
+
+// Safe score utilities
+function safeScoreValue(score: number | undefined | null): number {
+  return Number.isFinite(score ?? 0) ? (score ?? 0) : 0;
+}
+
+function safeScoreDisplay(score: number | undefined | null, decimals: number = 1): string {
+  const validScore = safeScoreValue(score ?? 0);
+  return validScore.toFixed(decimals);
+}
+
+function clampScore(score: number): number {
+  return Math.max(0, Math.min(100, safeScoreValue(score)));
 }
 
 export default async function ResultsPage({ params }: ResultsPageProps) {
@@ -151,10 +179,12 @@ export default async function ResultsPage({ params }: ResultsPageProps) {
         const cat = modelRun.categoryScores.find(
           (cs) => cs.categoryId === categoryId
         );
+        // Guard against division by zero (shouldn't happen given the map building logic, but being defensive)
+        const avgScore = count > 0 ? totalScore / count : 0;
         return {
           categoryId,
           categoryName: cat?.category.name || "Unknown",
-          totalScore: totalScore / count,
+          totalScore: avgScore,
         };
       }
     );
@@ -307,13 +337,13 @@ export default async function ResultsPage({ params }: ResultsPageProps) {
                     </Badge>
                   </div>
                   <p className="text-muted-foreground mt-1">
-                    Scored {winner.totalScore.toFixed(1)}% - highest across all
+                    Scored {safeScoreDisplay(winner.totalScore)}% - highest across all
                     categories
                   </p>
                 </div>
                 <div className="text-right">
                   <div className="text-4xl font-bold text-primary">
-                    {winner.totalScore.toFixed(0)}
+                    {safeScoreDisplay(winner.totalScore, 0)}
                   </div>
                   <div className="text-sm text-muted-foreground">points</div>
                 </div>
@@ -389,21 +419,21 @@ export default async function ResultsPage({ params }: ResultsPageProps) {
                                 result.totalScore
                               )}`}
                             >
-                              {result.totalScore.toFixed(1)}
+                              {safeScoreDisplay(result.totalScore)}
                             </span>
                           </td>
                           {allCategories.map((cat) => {
                             const catScore = result.categoryBreakdown.find(
                               (c) => c.categoryName === cat
                             );
-                            const score = catScore?.totalScore ?? 0;
+                            const score = safeScoreValue(catScore?.totalScore);
 
                             return (
                               <td key={cat} className="py-3 px-4 text-right">
                                 <div className="flex items-center justify-end gap-2">
-                                  <Progress value={score} className="h-2 w-12" />
+                                  <Progress value={clampScore(score)} className="h-2 w-12" />
                                   <span className="w-10 text-xs text-muted-foreground">
-                                    {score.toFixed(0)}
+                                    {safeScoreDisplay(score, 0)}
                                   </span>
                                 </div>
                               </td>

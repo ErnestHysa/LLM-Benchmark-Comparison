@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,9 +39,58 @@ interface ResultsClientProps {
 }
 
 function getScoreColor(score: number): string {
-  if (score >= 80) return "text-success";
-  if (score >= 60) return "text-warning";
+  // Guard against NaN or invalid scores
+  const validScore = Number.isFinite(score) ? score : 0;
+  if (validScore >= 80) return "text-success";
+  if (validScore >= 60) return "text-warning";
   return "text-error";
+}
+
+function getScoreBgColor(score: number): string {
+  // Guard against NaN or invalid scores
+  const validScore = Number.isFinite(score) ? score : 0;
+  if (validScore >= 80) return "bg-success/10 border-success/30 text-success";
+  if (validScore >= 60) return "bg-warning/10 border-warning/30 text-warning";
+  return "bg-error/10 border-error/30 text-error";
+}
+
+function getScoreNumberBg(score: number): string {
+  // Guard against NaN or invalid scores
+  const validScore = Number.isFinite(score) ? score : 0;
+  if (validScore >= 80) return "bg-success text-success-foreground";
+  if (validScore >= 60) return "bg-warning text-warning-foreground";
+  return "bg-error text-error-foreground";
+}
+
+// Category colors for visual distinction
+const categoryColors: Record<string, string> = {
+  CODING: "from-purple-500/20 to-purple-600/5 border-purple-500/30",
+  WRITING: "from-amber-500/20 to-amber-600/5 border-amber-500/30",
+  REASONING: "from-blue-500/20 to-blue-600/5 border-blue-500/30",
+  DEBUGGING: "from-red-500/20 to-red-600/5 border-red-500/30",
+  "API_DESIGN": "from-emerald-500/20 to-emerald-600/5 border-emerald-500/30",
+  "DATABASE_SCHEMA": "from-cyan-500/20 to-cyan-600/5 border-cyan-500/30",
+  "UI_UX_DESIGN": "from-pink-500/20 to-pink-600/5 border-pink-500/30",
+  "DATA_ANALYSIS": "from-orange-500/20 to-orange-600/5 border-orange-500/30",
+};
+
+function getCategoryColor(category: string): string {
+  return categoryColors[category] || "from-gray-500/20 to-gray-600/5 border-gray-500/30";
+}
+
+// Safe score utilities - protect against NaN/undefined/null values
+function safeScoreValue(score: number | undefined | null): number {
+  return Number.isFinite(score ?? 0) ? (score ?? 0) : 0;
+}
+
+function safeScoreDisplay(score: number | undefined | null, decimals: number = 1): string {
+  const validScore = safeScoreValue(score ?? 0);
+  return validScore.toFixed(decimals);
+}
+
+function clampScore(score: number): number {
+  // Ensure score is between 0 and 100
+  return Math.max(0, Math.min(100, safeScoreValue(score)));
 }
 
 // Metric Explanations Component
@@ -81,25 +130,34 @@ function MetricExplanations({ metrics }: { metrics: Metric[] }) {
   };
 
   return (
-    <div className="space-y-3 mt-4">
+    <div className="space-y-4 mt-4">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Lightbulb className="h-4 w-4" />
         <span>AI-generated explanations for each score</span>
       </div>
 
-      {Object.entries(byCategory).map(([category, categoryMetrics]) => {
+      {Object.entries(byCategory).map(([category, categoryMetrics], catIndex) => {
         const hasExplanations = categoryMetrics.some((m) => m.explanations.length > 0);
         if (!hasExplanations) return null;
 
         const isExpanded = expandedCategories.has(category);
+        const colorClass = getCategoryColor(category);
 
         return (
-          <div key={category} className="border border-border rounded-lg overflow-hidden">
+          <div
+            key={category}
+            className={`border rounded-xl overflow-hidden bg-gradient-to-br ${colorClass}`}
+          >
             <button
               onClick={() => toggleCategory(category)}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-surface-hover/50 transition-colors text-left"
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/5 transition-colors text-left"
             >
-              <span className="font-medium text-foreground">{category.replace("_", " ")}</span>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center h-6 w-6 rounded-full bg-white/10 text-xs font-bold">
+                  {catIndex + 1}
+                </span>
+                <span className="font-semibold text-foreground">{category.replace("_", " ")}</span>
+              </div>
               {isExpanded ? (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               ) : (
@@ -108,26 +166,30 @@ function MetricExplanations({ metrics }: { metrics: Metric[] }) {
             </button>
 
             {isExpanded && (
-              <div className="px-4 pb-4 space-y-3">
+              <div className="px-4 pb-4 space-y-3 bg-black/20">
                 {categoryMetrics.map((metric, idx) => (
-                  metric.explanations.map((explanation, expIdx) => (
-                    <div
-                      key={`${idx}-${expIdx}`}
-                      className="bg-surface/50 rounded-lg p-3 text-sm"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-foreground">
-                          {explanation.metricName}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          {explanation.value.toFixed(0)}/100
-                        </Badge>
+                  metric.explanations.map((explanation, expIdx) => {
+                    const scoreValue = safeScoreValue(explanation.value);
+                    return (
+                      <div
+                        key={`${idx}-${expIdx}`}
+                        className={`rounded-lg p-4 text-sm border backdrop-blur-sm ${getScoreBgColor(scoreValue)}`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <span className="font-semibold text-foreground flex-1">
+                            {explanation.metricName}
+                          </span>
+                          <div className={`flex items-center justify-center h-8 w-12 rounded-lg ${getScoreNumberBg(scoreValue)} font-bold text-lg shadow-sm`}>
+                            {safeScoreDisplay(scoreValue, 0)}
+                          </div>
+                        </div>
+                        <div className="h-px bg-white/10 my-2" />
+                        <p className="text-foreground/80 leading-relaxed">
+                          {explanation.explanation}
+                        </p>
                       </div>
-                      <p className="text-muted-foreground leading-relaxed">
-                        {explanation.explanation}
-                      </p>
-                    </div>
-                  ))
+                    );
+                  })
                 ))}
               </div>
             )}
@@ -153,8 +215,17 @@ export function ResultsClient({
     status: string;
     error?: string;
   } | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleViewOutput = (result: ModelResult) => {
+    if (!isMountedRef.current) return;
     setSelectedModel({
       modelId: result.modelId,
       output: result.output || "",
@@ -176,7 +247,7 @@ export function ResultsClient({
                   variant="outline"
                   className={getScoreColor(result.totalScore)}
                 >
-                  {result.totalScore.toFixed(1)}%
+                  {safeScoreDisplay(result.totalScore)}%
                 </Badge>
                 <Badge
                   variant="outline"
@@ -195,17 +266,15 @@ export function ResultsClient({
                 <div className="text-sm text-muted-foreground">
                   Rank #{index + 1}
                 </div>
-                {result.output && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleViewOutput(result)}
-                    className="gap-2"
-                  >
-                    <FileText className="h-4 w-4" />
-                    View Output
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleViewOutput(result)}
+                  className="gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  View Output
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -221,13 +290,13 @@ export function ResultsClient({
                       {category.categoryName}
                     </h4>
                     <div className="flex items-center gap-2">
-                      <Progress value={category.totalScore} className="h-2 w-20" />
+                      <Progress value={clampScore(category.totalScore)} className="h-2 w-20" />
                       <span
                         className={`text-sm font-medium ${getScoreColor(
                           category.totalScore
                         )}`}
                       >
-                        {category.totalScore.toFixed(1)}%
+                        {safeScoreDisplay(category.totalScore)}%
                       </span>
                     </div>
                   </div>
