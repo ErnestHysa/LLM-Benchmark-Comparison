@@ -64,13 +64,10 @@ describe("Export Utilities", () => {
       expect(url).toBe("https://example.com/results/run-123");
     });
 
-    it("should handle base URL with trailing slash", () => {
+    it("should normalize base URL with trailing slash", () => {
       const url = generateShareUrl("https://example.com/", "run-123");
 
-      // Note: The function doesn't strip trailing slashes, so we get double slash
-      // This is acceptable behavior as browsers handle it correctly
-      expect(url).toContain("example.com");
-      expect(url).toContain("/results/run-123");
+      expect(url).toBe("https://example.com/results/run-123");
     });
   });
 
@@ -98,5 +95,36 @@ describe("Export Utilities", () => {
       expect(twitterUrl).toContain("url=");
       expect(twitterUrl).toContain("GPT-4o");
     });
+  });
+});
+
+describe("CSV export shape", () => {
+  it("should include all category columns across models", async () => {
+    const { buildCSVContent } = await import("../export");
+    const result: ExportableResult = {
+      runId: "run-1",
+      benchmarkName: "CSV Benchmark",
+      benchmarkDescription: "CSV test",
+      completedAt: "2024-01-01T00:00:00Z",
+      models: [
+        {
+          rank: 1,
+          modelId: "model-a",
+          totalScore: 90,
+          categoryScores: [{ category: "Safety", score: 95 }],
+        },
+        {
+          rank: 2,
+          modelId: "model-b",
+          totalScore: 80,
+          categoryScores: [{ category: "Performance", score: 88 }],
+        },
+      ],
+    };
+
+    const csvText = buildCSVContent(result);
+
+    expect(csvText).toContain("safety");
+    expect(csvText).toContain("performance");
   });
 });

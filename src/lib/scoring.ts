@@ -128,12 +128,12 @@ export interface ModelRanking extends ModelScore {
 
 export function calculateRankings(scores: ModelScore[]): ModelRanking[] {
   const sorted = [...scores].sort((a, b) => b.score - a.score);
-  const total = sorted.length;
+  const allScores = sorted.map((entry) => entry.score);
 
   return sorted.map((entry, index) => ({
     ...entry,
     rank: index + 1,
-    percentile: (index / total) * 100,
+    percentile: calculatePercentile(entry.score, allScores),
   }));
 }
 

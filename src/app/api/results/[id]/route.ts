@@ -88,6 +88,17 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
       ? benchmarkRun.completedAt.getTime() - benchmarkRun.startedAt.getTime()
       : null;
 
+    // Resolve model display names
+
+    const modelIds = Array.from(
+      new Set(benchmarkRun.modelRuns.map((modelRun) => modelRun.modelId))
+    );
+    const knownModels = await prisma.model.findMany({
+      where: { providerId: { in: modelIds } },
+      select: { providerId: true, name: true },
+    });
+    const modelNameMap = new Map(knownModels.map((model) => [model.providerId, model.name]));
+
     // Format model results
     const modelResults = benchmarkRun.modelRuns.map((modelRun) => {
       // Calculate category scores
@@ -98,9 +109,10 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
       }));
 
       // Calculate total score
-      const totalScore = categoryScores.length > 0
-        ? categoryScores.reduce((sum, cs) => sum + cs.score, 0) / categoryScores.length
-        : 0;
+      const totalScore =
+        categoryScores.length > 0
+          ? categoryScores.reduce((sum, cs) => sum + cs.score, 0) / categoryScores.length
+          : 0;
 
       // Get metrics breakdown with explanations
       const metrics = modelRun.scores.map((score) => {
@@ -123,7 +135,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
 
       return {
         modelId: modelRun.modelId,
-        modelName: modelRun.modelId, // In production, would look up model name
+        modelName: modelNameMap.get(modelRun.modelId) || modelRun.modelId,
         status: modelRun.status,
         totalScore,
         output: modelRun.output,
@@ -162,9 +174,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
         benchmarkPrompt: benchmarkRun.benchmark.prompt,
         completedAt: benchmarkRun.completedAt?.toISOString(),
         duration,
-        durationFormatted: duration
-          ? `${Math.floor(duration / 1000)}s`
-          : null,
+        durationFormatted: duration ? `${Math.floor(duration / 1000)}s` : null,
         evaluator: benchmarkRun.evaluator,
         concurrency: benchmarkRun.concurrency,
         modelResults: modelResultsWithRank,

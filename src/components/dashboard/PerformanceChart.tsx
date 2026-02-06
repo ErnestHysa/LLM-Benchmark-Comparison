@@ -5,8 +5,6 @@
  *
  * Line chart showing model performance over time using Recharts
  */
-
-"use client";
 import {
   LineChart,
   Line,

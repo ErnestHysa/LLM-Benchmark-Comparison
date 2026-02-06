@@ -69,6 +69,21 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
     notFound();
   }
 
+  const modelNameRows = await prisma.model.findMany({
+    where: {
+      providerId: {
+        in: Array.from(
+          new Set(
+            benchmark.runs.flatMap((run) => run.modelRuns.map((modelRun) => modelRun.modelId))
+          )
+        ),
+      },
+    },
+    select: { providerId: true, name: true },
+  });
+
+  const modelNameMap = new Map(modelNameRows.map((model) => [model.providerId, model.name]));
+
   const breadcrumbItems = [
     { label: "Home", href: "/" },
     { label: "Benchmarks", href: "/benchmarks" },
@@ -107,12 +122,33 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
   const worstModel = sortedModels[sortedModels.length - 1];
 
   // Format results for comparison table
-  const comparisonData = sortedModels.map((m) => ({
-    modelId: m.modelId,
-    modelName: m.modelId, // In production, would look up model name
-    totalScore: m.avgScore,
-    categoryScores: [], // Would need to populate
-  }));
+  const comparisonData = sortedModels.map((m) => {
+    const categoryTotals = new Map<string, { total: number; count: number }>();
+
+    for (const run of benchmark.runs) {
+      const modelRun = run.modelRuns.find((mr) => mr.modelId === m.modelId);
+      if (!modelRun) continue;
+
+      for (const categoryScore of modelRun.categoryScores) {
+        const key = categoryScore.category.name;
+        const current = categoryTotals.get(key) || { total: 0, count: 0 };
+        categoryTotals.set(key, {
+          total: current.total + categoryScore.totalScore,
+          count: current.count + 1,
+        });
+      }
+    }
+
+    return {
+      modelId: m.modelId,
+      modelName: modelNameMap.get(m.modelId) || m.modelId,
+      totalScore: m.avgScore,
+      categoryScores: Array.from(categoryTotals.entries()).map(([category, value]) => ({
+        category,
+        score: value.total / value.count,
+      })),
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -125,17 +161,17 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
       <div className="animate-fade-in-up">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="mb-2 flex items-center gap-3">
               <Badge variant="outline" className={categoryColors[benchmark.primaryCategory]}>
                 {benchmark.primaryCategory.replace("_", " ")}
               </Badge>
             </div>
             <h1 className="text-3xl font-bold text-foreground">{benchmark.name}</h1>
-            <p className="text-muted-foreground mt-2">{benchmark.description}</p>
+            <p className="mt-2 text-muted-foreground">{benchmark.description}</p>
           </div>
           <Link href={`/benchmarks/${id}/run`}>
             <Button size="lg">
-              <Play className="h-4 w-4 mr-2" />
+              <Play className="mr-2 h-4 w-4" />
               Run Benchmark
             </Button>
           </Link>
@@ -145,7 +181,7 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
       {/* Tabs */}
       <div className="animate-fade-in-up delay-100">
         <Tabs defaultValue="prompt" className="space-y-4">
-          <TabsList className="bg-surface border border-border p-1 rounded-lg">
+          <TabsList className="rounded-lg border border-border bg-surface p-1">
             <TabsTrigger value="prompt">Prompt</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
             <TabsTrigger value="comparison">Comparison</TabsTrigger>
@@ -161,7 +197,7 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
                 </div>
               </CardHeader>
               <CardContent>
-                <pre className="bg-background border border-border rounded-lg p-4 overflow-x-auto text-sm">
+                <pre className="overflow-x-auto rounded-lg border border-border bg-background p-4 text-sm">
                   <code className="font-mono">{benchmark.prompt}</code>
                 </pre>
               </CardContent>
@@ -169,13 +205,21 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
 
             {/* Categories */}
             <div className="mt-6">
-              <h3 className="text-sm font-semibold text-foreground mb-3">Categories</h3>
+              <h3 className="mb-3 text-sm font-semibold text-foreground">Categories</h3>
               <div className="flex flex-wrap gap-2">
                 {benchmark.categories.map((cat) => (
                   <Badge
                     key={cat.id}
                     variant="outline"
-                    className={cat.color ? `border-[${cat.color}] text-[${cat.color}] bg-[${cat.color}]/10` : ""}
+                    style={
+                      cat.color
+                        ? {
+                            borderColor: cat.color,
+                            color: cat.color,
+                            backgroundColor: `${cat.color}1A`,
+                          }
+                        : undefined
+                    }
                   >
                     {cat.name}
                   </Badge>
@@ -191,7 +235,7 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
                 {benchmark.runs.slice(0, 5).map((run) => (
                   <Card key={run.id}>
                     <CardContent className="p-4">
-                      <div className="flex items-center justify-between mb-2">
+                      <div className="mb-2 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm font-medium">
@@ -222,7 +266,7 @@ export default async function BenchmarkPage({ params }: BenchmarkPageProps) {
             {sortedModels.length > 0 ? (
               <>
                 {/* Best/Worst */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                   {bestModel && (
                     <ScoreCard
                       title="Best Performing Model"
