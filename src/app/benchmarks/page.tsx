@@ -7,10 +7,12 @@
 import { prisma } from "@/lib/prisma";
 import { BenchmarkCard } from "@/components/dashboard";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Search } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 import { Suspense } from "react";
 import { BenchmarkHistory } from "@/components/BenchmarkHistory";
+import Link from "next/link";
 
 // Categories enum - matches Prisma schema
 const CATEGORIES = [
@@ -97,11 +99,19 @@ export default async function BenchmarksPage({
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Benchmarks</h1>
-        <p className="text-muted-foreground">
-          Browse {allBenchmarks.benchmarks.length} benchmarks across 8 categories
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Benchmarks</h1>
+          <p className="text-muted-foreground">
+            Browse {allBenchmarks.benchmarks.length} benchmarks across 8 categories
+          </p>
+        </div>
+        <Link href="/benchmarks/create">
+          <Button className="gap-2">
+            <Sparkles className="h-4 w-4" />
+            Create Benchmark
+          </Button>
+        </Link>
       </div>
 
       {/* Search */}
