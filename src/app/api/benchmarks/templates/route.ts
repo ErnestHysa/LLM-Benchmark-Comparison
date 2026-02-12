@@ -6,6 +6,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Helper function to safely parse JSON with error handling
+function parseJsonSafely(jsonString: string | null | undefined): any[] | null {
+  if (!jsonString) return null;
+  try {
+    return JSON.parse(jsonString);
+  } catch {
+    console.error("Failed to parse JSON:", jsonString);
+    return null;
+  }
+}
+
 // GET /api/benchmarks/templates - List templates
 export async function GET(request: NextRequest) {
   try {
@@ -51,10 +62,10 @@ export async function GET(request: NextRequest) {
         category: t.category,
         difficulty: t.difficulty,
         estimatedTokens: t.estimatedTokens,
-        tags: t.tags ? JSON.parse(t.tags) : [],
+        tags: parseJsonSafely(t.tags),
         prompt: t.prompt,
-        examples: t.examples ? JSON.parse(t.examples) : null,
-        variables: t.variables ? JSON.parse(t.variables) : null,
+        examples: parseJsonSafely(t.examples),
+        variables: parseJsonSafely(t.variables),
         isSystem: t.isSystem,
       })),
     });

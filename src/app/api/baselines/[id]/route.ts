@@ -57,10 +57,26 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     }
 
     // Parse modelIds from JSON
+    let parsedModelIds: string[];
+    let parsedScheduleConfig: any = null;
+
+    try {
+      parsedModelIds = JSON.parse(baseline.modelIds);
+    } catch (error) {
+      console.error(`[GET /api/baselines/${id}] Failed to parse modelIds:`, error);
+      parsedModelIds = [];
+    }
+
+    try {
+      parsedScheduleConfig = baseline.scheduleConfig ? JSON.parse(baseline.scheduleConfig) : null;
+    } catch (error) {
+      console.error(`[GET /api/baselines/${id}] Failed to parse scheduleConfig:`, error);
+    }
+
     const baselineWithParsedModels = {
       ...baseline,
-      modelIds: JSON.parse(baseline.modelIds),
-      scheduleConfig: baseline.scheduleConfig ? JSON.parse(baseline.scheduleConfig) : null,
+      modelIds: parsedModelIds,
+      scheduleConfig: parsedScheduleConfig,
     };
 
     return NextResponse.json({ baseline: baselineWithParsedModels });

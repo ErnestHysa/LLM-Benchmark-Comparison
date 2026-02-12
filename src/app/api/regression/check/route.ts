@@ -70,7 +70,14 @@ export async function POST(request: NextRequest) {
       throw new NotFoundError("Baseline", body.baselineId);
     }
 
-    const modelIds = JSON.parse(baseline.modelIds);
+    let modelIds: string[];
+    try {
+      modelIds = JSON.parse(baseline.modelIds);
+    } catch (error) {
+      console.error("[CI] Failed to parse modelIds:", error);
+      modelIds = [];
+    }
+
     const categories = [baseline.benchmark.primaryCategory];
 
     console.info("[CI] Starting regression check:", {

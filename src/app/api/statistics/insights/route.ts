@@ -174,7 +174,19 @@ Format your response as a JSON object with these keys: "findings", "trends", "co
       // Try to parse JSON from response
       const jsonMatch = response.content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        insights = JSON.parse(jsonMatch[0]);
+        try {
+          insights = JSON.parse(jsonMatch[0]);
+        } catch (parseError) {
+          console.error("[Insights] Failed to parse insights JSON:", parseError);
+          // Fallback: structure the text response
+          insights = {
+            findings: ["Unable to parse structured insights"],
+            trends: [],
+            costAnalysis: [],
+            recommendations: [],
+            rawResponse: response.content,
+          };
+        }
       } else {
         // Fallback: structure the text response
         insights = {

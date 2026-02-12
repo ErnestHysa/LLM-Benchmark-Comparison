@@ -1,85 +1,117 @@
 /**
- * Analytics Page
+ * Analytics Dashboard Page
  *
- * Advanced statistical analysis with:
- * - Confidence intervals
- * - Statistical significance tests
- * - Outlier detection
- * - Trend analysis
- * - AI-generated insights
+ * Comprehensive analytics with trends, costs, and performance insights
  */
 
-import { prisma } from "@/lib/prisma";
-import {
-  BarChart3,
-} from "lucide-react";
-import { Breadcrumb } from "@/components/layout";
-import { AnalyticsDashboard } from "@/components/analytics/AnalyticsDashboard";
-import type { Metadata } from "next";
+'use client';
 
-export const metadata: Metadata = {
-  title: "Analytics - LLM Benchmark",
-  description: "Advanced statistical analysis and AI-generated insights",
-};
+import { useState } from 'react';
+import { DashboardOverview } from '@/components/analytics/DashboardOverview';
+import { TrendChart } from '@/components/analytics/TrendChart';
+import { CostChart } from '@/components/analytics/CostChart';
+import { ComparisonChart } from '@/components/analytics/ComparisonChart';
+import { Heatmap } from '@/components/analytics/Heatmap';
+import { TimeRangeSelector } from '@/components/analytics/TimeRangeSelector';
+import { Card } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-async function getAnalyticsData() {
-  // Get available models and benchmarks for filters
-  const [models, benchmarks] = await Promise.all([
-    prisma.modelRun.findMany({
-      select: { modelId: true },
-      distinct: ["modelId"],
-      take: 50,
-    }),
-    prisma.benchmark.findMany({
-      select: { id: true, name: true },
-      where: { isPublic: true },
-      take: 50,
-    }),
-  ]);
+type Period = '7d' | '30d' | '90d' | 'all';
 
-  return {
-    models: models.map((m) => m.modelId),
-    benchmarks,
+export default function AnalyticsPage() {
+  const [period, setPeriod] = useState<Period>('30d');
+  const [benchmarkId, setBenchmarkId] = useState<string>('');
+  const [modelIds, setModelIds] = useState<string>('');
+
+  const handleBenchmarkChange = (value: string) => {
+    setBenchmarkId(value);
   };
-}
 
-export default async function AnalyticsPage() {
-  const data = await getAnalyticsData();
+  const handleModelChange = (value: string) => {
+    setModelIds(value);
+  };
+
+  const modelIdsArray = modelIds ? modelIds.split(',').map((m) => m.trim()).filter(Boolean) : undefined;
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-surface/50 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <BarChart3 className="h-5 w-5 text-primary" />
-              </div>
-              <Breadcrumb items={[
-                { label: "Home", href: "/" },
-                { label: "Analytics", current: true },
-              ]} />
-            </div>
+    <div className="container mx-auto py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">Analytics</h1>
+        <p className="text-muted-foreground mb-4">
+          Comprehensive insights into benchmark performance, costs, and trends
+        </p>
+      </div>
+
+      {/* Filters */}
+      <Card className="mb-6 p-4">
+        <div className="flex flex-wrap gap-4 items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="text-sm font-medium mb-2 block">Benchmark</label>
+            <select
+              className="w-full px-3 py-2 border border-border rounded-md bg-background"
+              value={benchmarkId}
+              onChange={(e) => handleBenchmarkChange(e.target.value)}
+            >
+              <option value="">All Benchmarks</option>
+              {/* Benchmarks would be loaded here */}
+            </select>
           </div>
-        </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Page Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Analytics Dashboard</h1>
-          <p className="text-muted-foreground">
-            Advanced statistical analysis and AI-powered insights
-          </p>
-        </div>
+          <div className="flex-1 min-w-[200px]">
+            <label className="text-sm font-medium mb-2 block">Models (comma separated)</label>
+            <input
+              type="text"
+              className="w-full px-3 py-2 border border-border rounded-md bg-background"
+              placeholder="e.g. gpt-4o, claude-3-5-sonnet"
+              value={modelIds}
+              onChange={(e) => handleModelChange(e.target.value)}
+            />
+          </div>
 
-        <AnalyticsDashboard
-          models={data.models}
-          benchmarks={data.benchmarks}
-        />
-      </main>
+          <TimeRangeSelector value={period} onChange={setPeriod} />
+        </div>
+      </Card>
+
+      {/* Dashboard Tabs */}
+      <Tabs defaultValue="overview" className="mb-6">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="trends">Trends</TabsTrigger>
+          <TabsTrigger value="costs">Costs</TabsTrigger>
+          <TabsTrigger value="comparison">Comparison</TabsTrigger>
+          <TabsTrigger value="heatmap">Heatmap</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
+          <DashboardOverview />
+        </TabsContent>
+
+        <TabsContent value="trends" className="space-y-4">
+          <TrendChart
+            benchmarkId={benchmarkId || undefined}
+            modelIds={modelIdsArray}
+            period={period}
+          />
+        </TabsContent>
+
+        <TabsContent value="costs" className="space-y-4">
+          <CostChart period={period} />
+        </TabsContent>
+
+        <TabsContent value="comparison" className="space-y-4">
+          {benchmarkId ? (
+            <ComparisonChart benchmarkId={benchmarkId} />
+          ) : (
+            <Card className="p-8 text-center text-muted-foreground">
+              Please select a benchmark to view comparison
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="heatmap" className="space-y-4">
+          <Heatmap period={period} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

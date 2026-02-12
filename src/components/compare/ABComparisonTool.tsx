@@ -192,7 +192,6 @@ function ModelSelector({
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent className="border-border/50 bg-surface/95 backdrop-blur-xl">
-          <SelectItem value="">None</SelectItem>
           {availableModels.map((model) => (
             <SelectItem key={model.providerId} value={model.providerId}>
               <div className="flex items-center gap-2">
@@ -1051,7 +1050,9 @@ export function ABComparisonTool() {
     for (const apiKey of apiKeys) {
       if (apiKey.isActive) {
         const decoded = decodeApiKey(apiKey.key);
-        apiKeysMap[apiKey.provider.toLowerCase()] = decoded;
+        if (decoded) {
+          apiKeysMap[apiKey.provider.toLowerCase()] = decoded;
+        }
       }
     }
 
@@ -1153,7 +1154,9 @@ export function ABComparisonTool() {
           for (const apiKey of apiKeys) {
             if (apiKey.isActive) {
               const decoded = decodeApiKey(apiKey.key);
-              apiKeysMap[apiKey.provider.toLowerCase()] = decoded;
+              if (decoded) {
+                apiKeysMap[apiKey.provider.toLowerCase()] = decoded;
+              }
             }
           }
 

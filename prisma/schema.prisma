@@ -1,4 +1,7 @@
-// schema.prisma
+/**
+ * Complete Schema for LLM Benchmark Comparison
+ * Includes Phase 1 (Core Benchmarking), Phase 2 (Analytics), and Phase 3 (Bulk Operations)
+ */
 
 generator client {
   provider = "prisma-client-js"
@@ -14,29 +17,29 @@ datasource db {
 // ============================================
 
 model Benchmark {
-  id          String   @id @default(cuid())
-  name        String
-  description String
-  prompt      String
+  id              String       @id @default(cuid())
+  name            String
+  description     String
+  prompt          String
   primaryCategory CategoryType // Primary category using enum
-  isPublic    Boolean  @default(false)
-  isSystem    Boolean  @default(false) // System templates vs user-created
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isPublic        Boolean      @default(false)
+  isSystem        Boolean      @default(false) // System templates vs user-created
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   // Custom Benchmark Builder fields
-  collectionId String? // Link to collection
-  difficulty   String? // beginner, intermediate, advanced, expert
+  collectionId    String? // Link to collection
+  difficulty      String? // beginner, intermediate, advanced, expert
   estimatedTokens Int? // Estimated tokens needed for LLM response
-  tags         String? // JSON array of tags
-  templateId   String? // If created from a template
+  tags            String? // JSON array of tags
+  templateId      String? // If created from a template
 
   // Relations
-  runs        BenchmarkRun[]
-  categories  BenchmarkCategory[] // Many-to-many with category model
+  runs                BenchmarkRun[]
+  categories          BenchmarkCategory[] // Many-to-many with category model
   regressionBaselines RegressionBaseline[]
-  collection  BenchmarkCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  template    BenchmarkTemplate? @relation("BenchmarkTemplate", fields: [templateId], references: [id], onDelete: SetNull)
+  collection          BenchmarkCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  template            BenchmarkTemplate?   @relation("BenchmarkTemplate", fields: [templateId], references: [id], onDelete: SetNull)
 
   @@index([collectionId])
   @@index([isPublic])
@@ -47,14 +50,14 @@ model BenchmarkCategory {
   id          String   @id @default(cuid())
   name        String   @unique
   description String?
-  color       String?  // For UI theming
+  color       String? // For UI theming
   createdAt   DateTime @default(now())
 
   // Relations
   benchmarks  Benchmark[]
   metrics     CategoryMetric[]
   scores      CategoryScore[]
-  scoreValues Score[]  // Opposite relation for Score.category
+  scoreValues Score[] // Opposite relation for Score.category
 }
 
 model CategoryMetric {
@@ -65,30 +68,35 @@ model CategoryMetric {
   categoryId  String
   createdAt   DateTime @default(now())
 
-  category    BenchmarkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  scores      Score[]
-  metricScores MetricScore[]  // Opposite relation for MetricScore.metric
+  category     BenchmarkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  scores       Score[]
+  metricScores MetricScore[] // Opposite relation for MetricScore.metric
 
   @@unique([name, categoryId])
   @@index([categoryId])
 }
 
 model BenchmarkRun {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   benchmarkId String
-  startedAt   DateTime @default(now())
+  startedAt   DateTime  @default(now())
   completedAt DateTime?
   status      RunStatus @default(PENDING)
-  timeoutSec  Int?     // null = no timeout
-  metadata    String?  // JSON metadata for custom data (fuzz test results, etc.)
+  timeoutSec  Int? // null = no timeout
+  metadata    String? // JSON metadata for custom data (fuzz test results, etc.)
 
   // Configuration
-  evaluator   String   // Model ID used for evaluation
-  concurrency Int      @default(5)
+  evaluator   String // Model ID used for evaluation
+  concurrency Int    @default(5)
+
+  // Real-time Progress (Phase 1)
+  progressId String? // For SSE targeting
 
   // Relations
-  benchmark   Benchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
-  modelRuns   ModelRun[]
+  benchmark       Benchmark           @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+  modelRuns       ModelRun[]
+  progressEntries BenchmarkProgress[]
+  logs            BenchmarkLog[]
 
   @@index([benchmarkId])
   @@index([status])
@@ -96,23 +104,23 @@ model BenchmarkRun {
 }
 
 model ModelRun {
-  id           String   @id @default(cuid())
+  id             String @id @default(cuid())
   benchmarkRunId String
-  modelId      String
+  modelId        String
 
-  startedAt    DateTime @default(now())
-  completedAt  DateTime?
-  status       RunStatus @default(PENDING)
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  status      RunStatus @default(PENDING)
 
   // LLM Output
-  output       String   @default("")
-  tokensUsed   Int?
-  cost         Float?
+  output     String @default("")
+  tokensUsed Int?
+  cost       Float?
 
   // Relations
-  benchmarkRun BenchmarkRun @relation(fields: [benchmarkRunId], references: [id], onDelete: Cascade)
-  scores       Score[]
-  humanRatings HumanRating[]
+  benchmarkRun   BenchmarkRun    @relation(fields: [benchmarkRunId], references: [id], onDelete: Cascade)
+  scores         Score[]
+  humanRatings   HumanRating[]
   categoryScores CategoryScore[]
 
   @@index([benchmarkRunId, modelId])
@@ -120,22 +128,22 @@ model ModelRun {
 }
 
 model Score {
-  id           String   @id @default(cuid())
-  modelRunId   String
-  categoryId   String
-  metricId     String?
+  id         String  @id @default(cuid())
+  modelRunId String
+  categoryId String
+  metricId   String?
 
-  value        Float    // 0.0 to 100.0 (renamed from 'score' to avoid conflict)
-  aiConfidence Float?   // AI's confidence in this score
-  humanOverride Boolean  @default(false)
+  value         Float // 0.0 to 100.0 (renamed from 'score' to avoid conflict)
+  aiConfidence  Float? // AI's confidence in this score
+  humanOverride Boolean @default(false)
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  modelRun     ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
+  modelRun     ModelRun          @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
   category     BenchmarkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  metric       CategoryMetric? @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  metric       CategoryMetric?   @relation(fields: [metricId], references: [id], onDelete: Cascade)
   metricScores MetricScore[]
 
   @@index([modelRunId, categoryId])
@@ -143,31 +151,31 @@ model Score {
 }
 
 model CategoryScore {
-  id          String   @id @default(cuid())
-  modelRunId   String
-  categoryId  String
+  id         String @id @default(cuid())
+  modelRunId String
+  categoryId String
 
-  totalScore  Float    // Weighted average of metrics
+  totalScore Float // Weighted average of metrics
 
   // Relations
-  modelRun    ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
-  category    BenchmarkCategory @relation(fields: [categoryId], references: [id])
+  modelRun ModelRun          @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
+  category BenchmarkCategory @relation(fields: [categoryId], references: [id])
 
   @@unique([modelRunId, categoryId])
   @@index([modelRunId])
 }
 
 model MetricScore {
-  id           String   @id @default(cuid())
-  scoreId      String
-  metricId     String
+  id       String @id @default(cuid())
+  scoreId  String
+  metricId String
 
-  value        Float    // 0.0 to 100.0 (renamed from 'score')
-  explanation  String?  // AI's reasoning
+  value       Float // 0.0 to 100.0 (renamed from 'score')
+  explanation String? // AI's reasoning
 
   // Relations
-  score        Score @relation(fields: [scoreId], references: [id], onDelete: Cascade)
-  metric       CategoryMetric @relation(fields: [metricId], references: [id])
+  score  Score          @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+  metric CategoryMetric @relation(fields: [metricId], references: [id])
 
   @@unique([scoreId, metricId])
   @@index([scoreId])
@@ -175,44 +183,82 @@ model MetricScore {
 }
 
 model HumanRating {
-  id          String   @id @default(cuid())
-  modelRunId   String
-  categoryId  String?
+  id         String  @id @default(cuid())
+  modelRunId String
+  categoryId String?
 
-  rating      Float    // 0.0 to 100.0
-  notes       String?  
-  createdAt   DateTime @default(now())
+  rating    Float // 0.0 to 100.0
+  notes     String?
+  createdAt DateTime @default(now())
 
   // Relations
-  modelRun    ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
+  modelRun ModelRun @relation(fields: [modelRunId], references: [id], onDelete: Cascade)
 
   @@index([modelRunId])
 }
 
-model Model {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  provider    ModelProvider
-  providerId  String   // e.g., "gpt-4o", "claude-3-5-sonnet"
-  description String?
-  isActive    Boolean  @default(true)
+// ============================================
+// REAL-TIME PROGRESS MODELS (Phase 1)
+// ============================================
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model BenchmarkProgress {
+  id             String   @id @default(cuid())
+  benchmarkRunId String
+  stepName       String
+  stepNumber     Int
+  totalSteps     Int
+  status         String // pending, running, completed, failed
+  message        String?
+  percentage     Float    @default(0)
+  metadata       String? // JSON for additional data
+  createdAt      DateTime @default(now())
+
+  // Relations
+  benchmarkRun BenchmarkRun @relation(fields: [benchmarkRunId], references: [id], onDelete: Cascade)
+
+  @@index([benchmarkRunId])
+  @@index([createdAt])
+}
+
+model BenchmarkLog {
+  id             String   @id @default(cuid())
+  benchmarkRunId String
+  level          String // info, warning, error, debug
+  message        String
+  metadata       String? // JSON context
+  timestamp      DateTime @default(now())
+
+  // Relations
+  benchmarkRun BenchmarkRun @relation(fields: [benchmarkRunId], references: [id], onDelete: Cascade)
+
+  @@index([benchmarkRunId])
+  @@index([timestamp])
+}
+
+model Model {
+  id          String        @id @default(cuid())
+  name        String        @unique
+  provider    ModelProvider
+  providerId  String // e.g., "gpt-4o", "claude-3-5-sonnet"
+  description String?
+  isActive    Boolean       @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([provider])
   @@index([isActive])
 }
 
 model ApiKey {
-  id          String   @id @default(cuid())
-  provider    ModelProvider
-  keyValue    String   // Encrypted in production
-  label       String?
-  isActive    Boolean  @default(true)
+  id       String        @id @default(cuid())
+  provider ModelProvider
+  keyValue String // Encrypted in production
+  label    String?
+  isActive Boolean       @default(true)
 
-  createdAt   DateTime @default(now())
-  lastUsed    DateTime?
+  createdAt DateTime  @default(now())
+  lastUsed  DateTime?
 
   @@index([provider])
   @@index([isActive])
@@ -223,35 +269,35 @@ model ApiKey {
 // ============================================
 
 model RegressionBaseline {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  benchmarkId     String   // The benchmark to run
-  modelIds        String   // JSON array of model IDs to test
-  evaluator       String   // Evaluator model ID
-  evaluatorProvider String  // Evaluator provider (openai, anthropic, etc.)
+  id                String  @id @default(cuid())
+  name              String
+  description       String?
+  benchmarkId       String // The benchmark to run
+  modelIds          String // JSON array of model IDs to test
+  evaluator         String // Evaluator model ID
+  evaluatorProvider String // Evaluator provider (openai, anthropic, etc.)
 
   // Thresholds for regression detection
-  thresholdMin    Float?   // Minimum acceptable score (0-100)
-  thresholdMax    Float?   // Maximum expected score (0-100)
-  regressionDelta Float?   // Alert if score drops by this percentage
+  thresholdMin    Float? // Minimum acceptable score (0-100)
+  thresholdMax    Float? // Maximum expected score (0-100)
+  regressionDelta Float? // Alert if score drops by this percentage
 
   // Scheduling
-  scheduleType    String   @default("manual") // manual, daily, weekly, webhook
-  scheduleConfig   String?  // JSON config for schedule (cron, webhook URL, etc.)
-  isActive        Boolean  @default(true)
+  scheduleType   String  @default("manual") // manual, daily, weekly, webhook
+  scheduleConfig String? // JSON config for schedule (cron, webhook URL, etc.)
+  isActive       Boolean @default(true)
 
   // Tracking
-  lastRunAt       DateTime?
-  lastStatus      String?  // success, failed, regressed
-  currentVersion  Int      @default(1)
+  lastRunAt      DateTime?
+  lastStatus     String? // success, failed, regressed
+  currentVersion Int       @default(1)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  benchmark       Benchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
-  runs            RegressionRun[]
+  benchmark Benchmark       @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+  runs      RegressionRun[]
 
   @@index([benchmarkId])
   @@index([isActive])
@@ -259,29 +305,29 @@ model RegressionBaseline {
 }
 
 model RegressionRun {
-  id              String   @id @default(cuid())
-  baselineId      String
-  status          String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, REGRESSED
+  id         String @id @default(cuid())
+  baselineId String
+  status     String @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, REGRESSED
 
   // Results summary
-  totalScore      Float?
-  previousScore   Float?
-  scoreDiff       Float?   // Difference from previous run
-  isRegression    Boolean  @default(false)
+  totalScore    Float?
+  previousScore Float?
+  scoreDiff     Float? // Difference from previous run
+  isRegression  Boolean @default(false)
 
   // Trigger info
-  triggerType     String   @default("manual") // manual, schedule, webhook, ci
-  triggerMetadata String?  // JSON with additional trigger info
+  triggerType     String  @default("manual") // manual, schedule, webhook, ci
+  triggerMetadata String? // JSON with additional trigger info
 
-  startedAt       DateTime @default(now())
-  completedAt     DateTime?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   // Relations
-  baseline        RegressionBaseline @relation(fields: [baselineId], references: [id], onDelete: Cascade)
-  modelRuns       RegressionModelRun[]
-  alerts          RegressionAlert[]
+  baseline  RegressionBaseline   @relation(fields: [baselineId], references: [id], onDelete: Cascade)
+  modelRuns RegressionModelRun[]
+  alerts    RegressionAlert[]
 
   @@index([baselineId])
   @@index([status])
@@ -290,53 +336,53 @@ model RegressionRun {
 }
 
 model RegressionModelRun {
-  id              String   @id @default(cuid())
+  id              String @id @default(cuid())
   regressionRunId String
   modelId         String
 
   // Scores
-  totalScore      Float
-  previousScore   Float?
-  scoreDiff       Float?
+  totalScore    Float
+  previousScore Float?
+  scoreDiff     Float?
 
   // Category breakdowns (JSON)
-  categoryScores  String?  // JSON array of category scores
+  categoryScores String? // JSON array of category scores
 
-  status          String   @default("COMPLETED") // COMPLETED, FAILED
-  errorMessage    String?
+  status       String  @default("COMPLETED") // COMPLETED, FAILED
+  errorMessage String?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   // Relations
-  regressionRun   RegressionRun @relation(fields: [regressionRunId], references: [id], onDelete: Cascade)
+  regressionRun RegressionRun @relation(fields: [regressionRunId], references: [id], onDelete: Cascade)
 
   @@index([regressionRunId])
   @@index([modelId])
 }
 
 model RegressionAlert {
-  id              String   @id @default(cuid())
+  id              String @id @default(cuid())
   regressionRunId String
   baselineId      String
 
   // Alert details
-  alertType       String   // score_dropped, threshold_failed, model_failed
-  severity        String   // info, warning, critical
-  message         String
-  metadata        String?  // JSON with additional context
+  alertType String // score_dropped, threshold_failed, model_failed
+  severity  String // info, warning, critical
+  message   String
+  metadata  String? // JSON with additional context
 
   // Delivery status
-  sentEmail       Boolean  @default(false)
-  sentWebhook     Boolean  @default(false)
-  sentSlack       Boolean  @default(false)
+  sentEmail   Boolean @default(false)
+  sentWebhook Boolean @default(false)
+  sentSlack   Boolean @default(false)
 
-  acknowledged    Boolean  @default(false)
-  acknowledgedAt  DateTime?
+  acknowledged   Boolean   @default(false)
+  acknowledgedAt DateTime?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   // Relations
-  regressionRun   RegressionRun @relation(fields: [regressionRunId], references: [id], onDelete: Cascade)
+  regressionRun RegressionRun @relation(fields: [regressionRunId], references: [id], onDelete: Cascade)
 
   @@index([regressionRunId])
   @@index([baselineId])
@@ -348,60 +394,203 @@ model RegressionAlert {
 // ============================================
 
 model BenchmarkCollection {
-  id          String   @id @default(cuid())
-  name        String
+  id          String  @id @default(cuid())
+  name        String  @unique
   description String?
   icon        String? // Emoji or icon name
-  color       String? // Hex color for UI
-  isPublic    Boolean  @default(false)
-  isSystem    Boolean  @default(false) // System collections vs user-created
-  order       Int      @default(0)
-
+  color       String? // Hex color for UI theming
+  isPublic    Boolean @default(false) // System collections vs user-created
+  isSystem    Boolean @default(false)
+  order       Int     @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
-  benchmarks  Benchmark[]
+  benchmarks Benchmark[]
+  templates  BenchmarkTemplate[]
 
-  @@index([isPublic])
-  @@index([isSystem])
-  @@index([order])
+  @@index([createdAt])
 }
 
 model BenchmarkTemplate {
-  id          String   @id @default(cuid())
-  name        String
+  id          String       @id @default(cuid())
+  name        String       @unique
   description String
   category    CategoryType
   prompt      String
 
   // Template metadata
-  difficulty  String   // beginner, intermediate, advanced, expert
+  difficulty      String // beginner, intermediate, advanced, expert
   estimatedTokens Int?
-  tags        String? // JSON array of tags
-  examples    String? // JSON array of example inputs/outputs
-  variables   String? // JSON array of customizable variables
+  tags            String? // JSON array of tags
+  examples        String? // JSON array of example inputs/outputs
+  variables       String? // JSON array of customizable variables
 
-  isSystem    Boolean  @default(false)
-  isActive    Boolean  @default(true)
-  usesCount   Int      @default(0)
+  isSystem  Boolean @default(false)
+  isActive  Boolean @default(true)
+  usesCount Int     @default(0)
+  collectionId String? // Link to collection
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  benchmarks  Benchmark[] @relation("BenchmarkTemplate")
+  benchmarks Benchmark[] @relation("BenchmarkTemplate")
+  collection BenchmarkCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
 
   @@index([category])
   @@index([isActive])
   @@index([isSystem])
+  @@index([collectionId])
+}
+
+// ============================================
+// PHASE 3: BULK BENCHMARK OPERATIONS
+// ============================================
+
+model BenchmarkBatch {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  description      String?
+  benchmarkIds     String   // JSON array of benchmark IDs
+  modelIds         String   // JSON array of model IDs
+  evaluatorModel   String   // Model ID used for evaluation
+  evaluatorProvider String   // Provider: openai, anthropic, openrouter, custom
+  concurrency      Int      @default(5)
+  status           String   // PENDING, RUNNING, COMPLETED, PARTIAL, FAILED
+  totalRuns        Int      @default(0)
+  completedRuns    Int      @default(0)
+  failedRuns       Int      @default(0)
+  startedAt        DateTime @default(now())
+  completedAt      DateTime?
+  metadata         String?  // JSON for custom data
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  batchRuns BenchmarkBatchRun[]
+
+  @@index([createdAt])
+  @@index([status])
+}
+
+model BenchmarkBatchRun {
+  id             String   @id @default(cuid())
+  batchId        String
+  benchmarkRunId String   // References the actual BenchmarkRun
+
+  status     String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  score      Float?
+  tokensUsed Int?
+  cost       Float?
+  duration   Int?     // milliseconds
+
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  errorMessage String?
+
+  // Relations
+  batch BenchmarkBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([status])
+  @@index([benchmarkRunId])
+}
+
+model BatchRunResult {
+  id             String   @id @default(cuid())
+  benchmarkRunId String
+  benchmarkId    String   // Denormalized for single-run view
+  benchmarkName  String
+  modelId        String
+  modelName      String
+  status         String   // COMPLETED, PARTIAL, FAILED, TIMEOUT
+  score          Float?   // Normalized 0-100 score
+  tokensUsed     Int?
+  cost           Float?
+  duration       Int?     // milliseconds
+  errorMessage   String?
+  startedAt      DateTime
+  completedAt    DateTime?
+  rank           Int?     // 1 = best, 2 = second best, etc.
+  metadata       String?  // Additional result data
+  createdAt      DateTime @default(now())
+
+  @@index([benchmarkRunId, modelId])
+  @@index([status, rank])
+}
+
+model BatchConfig {
+  id               String   @id @default(cuid())
+  name             String
+  benchmarkIds     String   // JSON array of benchmark IDs
+  modelIds         String   // JSON array of model IDs
+  evaluatorModel   String   // Model ID for evaluation
+  evaluatorProvider String  // openai, anthropic, openrouter, custom
+  concurrency      Int      @default(5)
+  scheduleConfig   String?  // JSON config for schedule
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([name])
+  @@index([createdAt])
+}
+
+// ============================================
+// ANALYTICS MODELS (Phase 2)
+// ============================================
+
+model CostTracking {
+  id              String   @id @default(cuid())
+  period          String   @default("month") // day, week, month, year
+
+  // Cost totals
+  totalCost       Float    @default(0)
+  openaiCost      Float    @default(0)
+  anthropicCost   Float    @default(0)
+  openrouterCost  Float    @default(0)
+  customCost      Float    @default(0)
+
+  // Token totals
+  totalTokens     Int      @default(0)
+  inputTokens     Int      @default(0)
+  outputTokens    Int      @default(0)
+
+  // Run counts
+  totalRuns       Int      @default(0)
+  successfulRuns  Int      @default(0)
+  failedRuns      Int      @default(0)
+
+  periodStart     DateTime
+  periodEnd       DateTime
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([period, periodStart])
+  @@index([periodStart])
+}
+
+model PerformanceMetric {
+  id              String   @id @default(cuid())
+  benchmarkRunId  String   @unique
+
+  // Timing metrics
+  totalDuration   Int      // milliseconds
+  avgModelDuration Int
+  minModelDuration Int
+  maxModelDuration Int
+
+  createdAt       DateTime @default(now())
+
+  @@index([benchmarkRunId])
 }
 
 // ============================================
 // ENUMS
 // ============================================
 
-// Renamed from BenchmarkCategory to avoid conflict with model
 enum CategoryType {
   CODING
   WRITING
@@ -417,6 +606,7 @@ enum RunStatus {
   PENDING
   RUNNING
   COMPLETED
+  PARTIAL
   FAILED
   CANCELLED
   TIMEOUT
@@ -427,4 +617,94 @@ enum ModelProvider {
   ANTHROPIC
   OPENROUTER
   CUSTOM
+}
+
+// ============================================
+// USER SETTINGS MODELS
+// ============================================
+
+model UserSettings {
+  id String @id @default(cuid())
+
+  // User identifier (for multi-user support in future)
+  userId String? @default("default")
+
+  // API Keys (encrypted in storage, base64 in DB for simplicity - consider proper encryption in production)
+  apiKeys String // JSON array of API keys
+
+  // Custom models
+  customModels String // JSON array of custom models
+
+  // Disabled predefined models
+  disabledPredefinedModels String // JSON array of model IDs
+
+  // Evaluator configuration
+  evaluatorModel    String
+  evaluatorProvider String
+  evaluatorApiKeyId String? // Reference to an API key ID
+
+  // Preferences
+  theme               String  @default("dark")
+  concurrency         Int     @default(5)
+  timeoutEnabled      Boolean @default(true)
+  timeoutSec          Int     @default(600)
+  maxTokens           Int     @default(8192)
+  exportFormat        String  @default("csv")
+  includeMetrics      Boolean @default(true)
+  includeExplanations Boolean @default(true)
+
+  // Auto-sync preference
+  autoSync Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId])
+  @@index([userId])
+}
+
+// ============================================
+// ANALYTICS MODELS (Phase 2)
+// ============================================
+
+// Model pricing for cost calculations
+model ModelPricing {
+  id           String        @id @default(cuid())
+  provider     ModelProvider
+  modelId      String // e.g., "gpt-4o", "claude-3-5-sonnet"
+  inputPrice   Float // Price per million input tokens
+  outputPrice  Float // Price per million output tokens
+  contextPrice Float? // Price per million context tokens (default: same as output)
+  maxTokens    Int? // Context window for this model
+  isActive     Boolean       @default(true)
+
+  @@unique([provider, modelId])
+  @@index([provider])
+}
+
+// Benchmark stats aggregation for analytics
+model BenchmarkStats {
+  id          String @id @default(cuid())
+  benchmarkId String
+  modelId     String
+
+  // Aggregated metrics
+  avgScore    Float
+  minScore    Float
+  maxScore    Float
+  runCount    Int
+  successRate Float
+
+  // Time period
+  period      String // day, week, month, all
+  periodStart DateTime
+  periodEnd   DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([benchmarkId, modelId, period, periodStart])
+  @@index([benchmarkId])
+  @@index([modelId])
+  @@index([periodStart])
 }

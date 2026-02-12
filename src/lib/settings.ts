@@ -99,6 +99,7 @@ export const PreferencesSchema = z.object({
   exportFormat: ExportFormatEnum.default("csv"),
   includeMetrics: z.boolean().default(true),
   includeExplanations: z.boolean().default(true),
+  autoSync: z.boolean().default(false), // Auto-sync settings to database
 });
 
 export type Preferences = z.infer<typeof PreferencesSchema>;
@@ -126,6 +127,7 @@ export const SettingsSchema = z.object({
     exportFormat: "csv",
     includeMetrics: true,
     includeExplanations: true,
+    autoSync: false,
   }),
 });
 
@@ -154,6 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
     exportFormat: "csv",
     includeMetrics: true,
     includeExplanations: true,
+    autoSync: false,
   },
 };
 
@@ -190,11 +193,17 @@ export function encodeApiKey(key: string): string {
   return btoa(key);
 }
 
-export function decodeApiKey(encoded: string): string {
+export function decodeApiKey(encoded: string): string | null {
+  if (!encoded) return null;
   try {
-    return atob(encoded);
+    const decoded = atob(encoded);
+    // Basic validation: decoded string should be non-empty and reasonable length
+    if (!decoded || decoded.length < 10) {
+      return null;
+    }
+    return decoded;
   } catch {
-    return "";
+    return null;
   }
 }
 
@@ -507,26 +516,28 @@ export class SettingsManager {
         return true;
       }
 
-      // Merge with existing settings
-      const settings = this.getSettings();
-      const existingIds = new Set(settings.models.map((m) => m.id));
+    // Merge with existing settings
+        const settings = this.getSettings();
+        const existingIds = new Set(settings.models.map((m) => m.id));
+        const existingNames = new Set(settings.models.map((m) => m.name));
 
-      let addedCount = 0;
-      for (const dbModel of dbModels) {
-        // Only add if not already in localStorage
-        if (!existingIds.has(dbModel.id)) {
-          settings.models.push({
-            id: dbModel.id,
-            name: dbModel.providerId, // For custom models, name = providerId
-            displayName: dbModel.displayName || dbModel.name,
-            provider: dbModel.provider,
-            description: dbModel.description,
-            isEnabled: dbModel.isEnabled ?? true,
-            isCustom: true,
-          });
-          addedCount++;
+        let addedCount = 0;
+        for (const dbModel of dbModels) {
+          // Only add if not already in localStorage (check both id and name to avoid duplicates)
+          const modelName = dbModel.providerId || dbModel.name;
+          if (!existingIds.has(dbModel.id) && !existingNames.has(modelName)) {
+            settings.models.push({
+              id: dbModel.id,
+              name: modelName, // For custom models, name = providerId
+              displayName: dbModel.displayName || dbModel.name,
+              provider: dbModel.provider,
+              description: dbModel.description,
+              isEnabled: dbModel.isEnabled ?? true,
+              isCustom: true,
+            });
+            addedCount++;
+          }
         }
-      }
 
       if (addedCount > 0) {
         this.saveSettings(settings);
@@ -537,6 +548,207 @@ export class SettingsManager {
     } catch (error) {
       console.error("[SettingsManager] Error loading custom models:", error);
       return false;
+    }
+  }
+
+  /**
+   * Sync all settings to database
+   * Call this to save all settings (API keys, models, preferences) to the database
+   */
+  static async syncSettingsToDatabase(): Promise<{ success: boolean; message: string; error?: string }> {
+    if (typeof window === "undefined") return { success: false, message: "Not in browser environment" };
+
+    try {
+      const settings = this.getSettings();
+
+      const payload = {
+        apiKeys: settings.apiKeys,
+        customModels: settings.models,
+        disabledPredefinedModels: settings.disabledPredefinedModels,
+        evaluatorModel: settings.evaluator.model,
+        evaluatorProvider: settings.evaluator.provider,
+        evaluatorApiKeyId: settings.evaluator.apiKeyId,
+        theme: settings.preferences.theme,
+        concurrency: settings.preferences.concurrency,
+        timeoutEnabled: settings.preferences.timeoutEnabled,
+        timeoutSec: settings.preferences.timeoutSec,
+        maxTokens: settings.preferences.maxTokens,
+        exportFormat: settings.preferences.exportFormat,
+        includeMetrics: settings.preferences.includeMetrics,
+        includeExplanations: settings.preferences.includeExplanations,
+        autoSync: true, // Enable auto-sync after manual sync
+      };
+
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return {
+          success: false,
+          message: errorData.error?.message || "Failed to sync settings",
+          error: errorData.error?.code,
+        };
+      }
+
+      const data = await response.json();
+      console.info("[SettingsManager] Settings synced to database:", data);
+
+      // Update local auto-sync preference
+      settings.preferences = { ...settings.preferences, autoSync: true };
+      this.saveSettings(settings);
+
+      return {
+        success: true,
+        message: data.message || "Settings saved to database successfully",
+      };
+    } catch (error) {
+      console.error("[SettingsManager] Error syncing settings to database:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to sync settings",
+        error: "NETWORK_ERROR",
+      };
+    }
+  }
+
+  /**
+   * Load all settings from database
+   * Call this to restore settings from database to localStorage
+   */
+  static async loadSettingsFromDatabase(): Promise<{ success: boolean; message: string; loaded?: boolean; error?: string }> {
+    if (typeof window === "undefined") return { success: false, message: "Not in browser environment" };
+
+    try {
+      const response = await fetch("/api/settings");
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: "Failed to load settings from database",
+          error: "NETWORK_ERROR",
+        };
+      }
+
+      const data = await response.json();
+
+      if (!data.exists) {
+        return {
+          success: true,
+          message: "No saved settings found in database",
+          loaded: false,
+        };
+      }
+
+      const dbSettings = data.settings;
+
+      // Merge database settings with current settings
+      const currentSettings = this.getSettings();
+      const mergedSettings: Settings = {
+        ...currentSettings,
+        apiKeys: dbSettings.apiKeys || [],
+        models: dbSettings.customModels || [],
+        disabledPredefinedModels: dbSettings.disabledPredefinedModels || [],
+        evaluator: {
+          ...currentSettings.evaluator,
+          model: dbSettings.evaluator?.model || currentSettings.evaluator.model,
+          provider: dbSettings.evaluator?.provider || currentSettings.evaluator.provider,
+          apiKeyId: dbSettings.evaluator?.apiKeyId || currentSettings.evaluator.apiKeyId,
+        },
+        preferences: {
+          ...currentSettings.preferences,
+          theme: dbSettings.preferences?.theme || currentSettings.preferences.theme,
+          concurrency: dbSettings.preferences?.concurrency ?? currentSettings.preferences.concurrency,
+          timeoutEnabled: dbSettings.preferences?.timeoutEnabled ?? currentSettings.preferences.timeoutEnabled,
+          timeoutSec: dbSettings.preferences?.timeoutSec ?? currentSettings.preferences.timeoutSec,
+          maxTokens: dbSettings.preferences?.maxTokens ?? currentSettings.preferences.maxTokens,
+          exportFormat: dbSettings.preferences?.exportFormat || currentSettings.preferences.exportFormat,
+          includeMetrics: dbSettings.preferences?.includeMetrics ?? currentSettings.preferences.includeMetrics,
+          includeExplanations: dbSettings.preferences?.includeExplanations ?? currentSettings.preferences.includeExplanations,
+          autoSync: dbSettings.autoSync ?? true,
+        },
+      };
+
+      this.saveSettings(mergedSettings);
+      console.info("[SettingsManager] Settings loaded from database");
+
+      return {
+        success: true,
+        message: "Settings loaded from database successfully",
+        loaded: true,
+      };
+    } catch (error) {
+      console.error("[SettingsManager] Error loading settings from database:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to load settings",
+        error: "NETWORK_ERROR",
+      };
+    }
+  }
+
+  /**
+   * Check if settings exist in database
+   */
+  static async checkDatabaseSettings(): Promise<boolean> {
+    if (typeof window === "undefined") return false;
+
+    try {
+      const response = await fetch("/api/settings");
+      if (!response.ok) return false;
+
+      const data = await response.json();
+      return data.exists || false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Clear settings from database
+   */
+  static async clearDatabaseSettings(): Promise<{ success: boolean; message: string }> {
+    if (typeof window === "undefined") return { success: false, message: "Not in browser environment" };
+
+    try {
+      const response = await fetch("/api/settings", { method: "DELETE" });
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: "Failed to clear database settings",
+        };
+      }
+
+      // Also update local auto-sync preference
+      const settings = this.getSettings();
+      settings.preferences = { ...settings.preferences, autoSync: false };
+      this.saveSettings(settings);
+
+      return {
+        success: true,
+        message: "Database settings cleared",
+      };
+    } catch (error) {
+      console.error("[SettingsManager] Error clearing database settings:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to clear settings",
+      };
+    }
+  }
+
+  /**
+   * Auto-sync settings to database (if enabled)
+   * Call this after any settings change
+   */
+  static async autoSyncIfNeeded(): Promise<void> {
+    const settings = this.getSettings();
+    if ((settings.preferences as any).autoSync) {
+      await this.syncSettingsToDatabase();
     }
   }
 }

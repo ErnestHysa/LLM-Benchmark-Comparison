@@ -89,10 +89,42 @@ async function getDashboardData() {
     },
   });
 
-  const benchmarksWithScores = recentBenchmarks.map((benchmark) => ({
-    ...benchmark,
-    avgScore: null, // Would need complex query for accurate avg
-  }));
+  // Calculate average scores for each benchmark
+  const benchmarksWithScores = await Promise.all(
+    recentBenchmarks.map(async (benchmark) => {
+      // Get all model runs for this benchmark's runs
+      const benchmarkRunIds = (
+        await prisma.benchmarkRun.findMany({
+          where: { benchmarkId: benchmark.id },
+          select: { id: true },
+        })
+      ).map((run) => run.id);
+
+      let avgScore: number | null = null;
+
+      if (benchmarkRunIds.length > 0) {
+        // Get all category scores for these benchmark runs
+        const categoryScores = await prisma.categoryScore.findMany({
+          where: {
+            modelRun: {
+              benchmarkRunId: { in: benchmarkRunIds },
+            },
+          },
+          select: { totalScore: true },
+        });
+
+        if (categoryScores.length > 0) {
+          const totalScore = categoryScores.reduce((sum, score) => sum + score.totalScore, 0);
+          avgScore = totalScore / categoryScores.length;
+        }
+      }
+
+      return {
+        ...benchmark,
+        avgScore,
+      };
+    })
+  );
 
   return {
     totalRuns,
@@ -116,13 +148,64 @@ export default async function DashboardPage() {
     recentBenchmarks,
   } = data;
 
-  // Format performance chart data (mock if no real data yet)
-  const chartData = [
-    { date: "Week 1", "GPT-4o": 82, "Claude 3.5 Sonnet": 78 },
-    { date: "Week 2", "GPT-4o": 85, "Claude 3.5 Sonnet": 82 },
-    { date: "Week 3", "GPT-4o": 88, "Claude 3.5 Sonnet": 85 },
-    { date: "Week 4", "GPT-4o": 86, "Claude 3.5 Sonnet": 87 },
-  ];
+  // Get last 4 weeks of performance data from ModelRun (which has categoryScores)
+  const weeklyData = await prisma.modelRun.findMany({
+    where: {
+      status: "COMPLETED",
+      completedAt: {
+        gte: new Date(Date.now() - 28 * 24 * 60 * 60 * 1000), // Last 4 weeks
+      },
+    },
+    include: {
+      categoryScores: {
+        select: { totalScore: true },
+      },
+    },
+    orderBy: { completedAt: "asc" },
+    take: 200,
+  });
+
+  // Group by week and calculate averages
+  const weekMap = new Map<number, Map<string, { sum: number; count: number }>>();
+
+  for (const run of weeklyData) {
+    const weekNum = Math.floor(
+      (Date.now() - new Date(run.completedAt!).getTime()) / (7 * 24 * 60 * 60 * 1000)
+    );
+
+    if (!weekMap.has(weekNum)) {
+      weekMap.set(weekNum, new Map());
+    }
+
+    const weekModels = weekMap.get(weekNum)!;
+    const avgScore = run.categoryScores.length > 0
+      ? run.categoryScores.reduce((sum, cs) => sum + cs.totalScore, 0) / run.categoryScores.length
+      : 0;
+
+    // Use a generic identifier since we don't have model info at this level
+    const modelKey = "Average";
+    const existing = weekModels.get(modelKey);
+    if (existing) {
+      existing.sum += avgScore;
+      existing.count += 1;
+    } else {
+      weekModels.set(modelKey, { sum: avgScore, count: 1 });
+    }
+  }
+
+  // Convert to chart format
+  const chartData = Array.from(weekMap.entries())
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, 4)
+    .map(([weekNum, weekModels]) => {
+      const row: Record<string, string | number> = { date: `Week ${4 - weekNum}` };
+
+      for (const [modelKey, scores] of weekModels.entries()) {
+        row[modelKey] = scores.count > 0 ? scores.sum / scores.count : 0;
+      }
+
+      return row;
+    });
 
   return (
     <div className="space-y-8">
@@ -200,7 +283,7 @@ export default async function DashboardPage() {
         {/* Performance Chart */}
         <div className="animate-fade-in-up delay-200">
           <PerformanceChart
-            data={chartData}
+            data={chartData as any}
             models={["GPT-4o", "Claude 3.5 Sonnet"]}
             type="line"
           />

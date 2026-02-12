@@ -126,7 +126,7 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
     // Check if we have valid keys (not empty/placeholder values)
     const invalidKeys = activeApiKeys.filter((key) => {
       const decoded = decodeApiKey(key.key);
-      return !decoded || decoded === "" || decoded.length < 10;
+      return decoded === null || decoded === "" || decoded.length < 10;
     });
 
     if (invalidKeys.length > 0) {
@@ -142,7 +142,12 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
     const apiKeys = activeApiKeys.reduce((acc, key) => {
       // Decode and add to apiKeys object
       const provider = key.provider.toLowerCase();
-      acc[provider] = decodeApiKey(key.key);
+      const decoded = decodeApiKey(key.key);
+      if (decoded === null) {
+        // Skip invalid keys - the API call will fail but won't crash
+        return acc;
+      }
+      acc[provider] = decoded;
       return acc;
     }, {} as Record<string, string>);
 
@@ -356,39 +361,118 @@ export function FuzzTestRunner({ models }: FuzzTestRunnerProps) {
               <CardTitle>Test Results</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {results.mockResults.map((result: any) => (
-                <div
-                  key={result.modelId}
-                  className={`p-4 rounded-lg ${getScoreBg(result.overallScore)}`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-semibold">{result.modelId}</h4>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={getScoreColor(result.overallScore)}>
-                        {result.overallScore}% Robustness
-                      </Badge>
-                      <span className="text-sm text-muted-foreground">
-                        {result.passed} passed / {result.failed} failed
-                      </span>
+              {results.mockResults ? (
+                // Mock results fallback
+                results.mockResults.map((result: any) => (
+                  <div
+                    key={result.modelId}
+                    className={`p-4 rounded-lg ${getScoreBg(result.overallScore)}`}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold">{result.modelId}</h4>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={getScoreColor(result.overallScore)}>
+                          {result.overallScore}% Robustness
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
+                          {result.passed} passed / {result.failed} failed
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {result.vulnerabilities.map((vuln: any) => (
+                        <div
+                          key={vuln.category}
+                          className="flex items-center justify-between text-sm p-2 bg-background rounded"
+                        >
+                          <span className="capitalize">{vuln.category.replace("_", " ")}</span>
+                          {vuln.passed ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-error" />
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    {result.vulnerabilities.map((vuln: any) => (
-                      <div
-                        key={vuln.category}
-                        className="flex items-center justify-between text-sm p-2 bg-background rounded"
-                      >
-                        <span className="capitalize">{vuln.category.replace("_", " ")}</span>
-                        {vuln.passed ? (
-                          <CheckCircle2 className="h-4 w-4 text-success" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-error" />
-                        )}
+                ))
+              ) : results.data?.results?.modelReports ? (
+                // Real API results
+                results.data.results.modelReports.map(([modelId, report]: [string, any]) => (
+                  <div
+                    key={modelId}
+                    className={`p-4 rounded-lg ${getScoreBg(report.overallScore)}`}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold">{modelId}</h4>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={getScoreColor(report.overallScore)}>
+                          {Math.round(report.overallScore)}% Robustness
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
+                          {report.passed} passed / {report.failed} failed
+                        </span>
                       </div>
-                    ))}
+                    </div>
+                    <div className="space-y-2">
+                      {report.vulnerabilities.length > 0 ? (
+                        report.vulnerabilities.map((vuln: any) => (
+                          <div
+                            key={vuln.category}
+                            className="flex items-center justify-between text-sm p-2 bg-background rounded"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="capitalize">{vuln.category.replace("_", " ")}</span>
+                              <Badge variant="outline" className={`text-xs ${
+                                vuln.severity === "high" ? "text-error" :
+                                vuln.severity === "medium" ? "text-warning" : "text-muted-foreground"
+                              }`}>
+                                {vuln.severity}
+                              </Badge>
+                            </div>
+                            <span className="text-xs text-muted-foreground">{vuln.count} issues</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-sm text-muted-foreground p-2 bg-background rounded">
+                          No vulnerabilities found
+                        </div>
+                      )}
+                    </div>
                   </div>
+                ))
+              ) : results.data?.results ? (
+                // Results in different format (byModel)
+                Object.entries(results.data.results.byModel || {}).map(([modelId, data]: [string, any]) => {
+                  // Calculate overall score based on pass rate
+                  const overallScore = data.total > 0 ? Math.round((data.passed / data.total) * 100) : 0;
+                  return (
+                    <div
+                      key={modelId}
+                      className={`p-4 rounded-lg ${getScoreBg(overallScore)}`}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold">{modelId}</h4>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={getScoreColor(overallScore)}>
+                            {overallScore}% Robustness
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            {data.passed} passed / {data.failed} failed
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {data.total} tests completed
+                      </p>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center p-4 text-muted-foreground">
+                  No results available. The test may still be running or results could not be retrieved.
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
         )}

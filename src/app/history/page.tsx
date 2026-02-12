@@ -5,23 +5,12 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Filter,
-  Search,
-} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Breadcrumb } from "@/components/layout";
 import { HistoryClient } from "@/components/history/HistoryClient";
+import { HistoryFilters } from "@/components/history/HistoryFilters";
 
 interface HistoryPageProps {
   searchParams: Promise<{
@@ -173,67 +162,14 @@ export default async function HistoryPage({
       {/* Filters */}
       <div className="animate-fade-in-up delay-100">
         <Card className="p-4">
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search benchmarks..."
-                defaultValue={search}
-                className="pl-10"
-              />
-            </div>
-
-            {/* Category Filter */}
-            <Select defaultValue={category || "all"}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {filterOptions.categories.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.name}>
-                    {cat.name.replace("_", " ")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Model Filter */}
-            <Select defaultValue={model || "all"}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Models</SelectItem>
-                {filterOptions.models.slice(0, 20).map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m.length > 25 ? m.slice(0, 25) + "..." : m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Status Filter */}
-            <Select defaultValue={status || "all"}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="COMPLETED">Completed</SelectItem>
-                <SelectItem value="RUNNING">Running</SelectItem>
-                <SelectItem value="FAILED">Failed</SelectItem>
-                <SelectItem value="TIMEOUT">Timeout</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Apply Filters Button */}
-            <Button>
-              <Filter className="h-4 w-4 mr-2" />
-              Apply
-            </Button>
-          </div>
+          <HistoryFilters
+            categories={filterOptions.categories}
+            models={filterOptions.models}
+            initialSearch={search}
+            initialCategory={category}
+            initialModel={model}
+            initialStatus={status}
+          />
         </Card>
       </div>
 

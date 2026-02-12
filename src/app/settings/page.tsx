@@ -7,7 +7,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Key, Cpu, Brain, Sliders } from "lucide-react";
+import { Key, Cpu, Brain, Sliders, Cloud } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Breadcrumb } from "@/components/layout";
@@ -25,6 +25,7 @@ import { ApiKeyManager } from "@/components/settings/ApiKeyManager";
 import { ModelManager } from "@/components/settings/ModelManager";
 import { EvaluatorSelector } from "@/components/settings/EvaluatorSelector";
 import { Preferences as PreferencesComponent } from "@/components/settings/Preferences";
+import { SettingsSync } from "@/components/settings/SettingsSync";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsType>(SettingsManager.getSettings());
@@ -32,20 +33,29 @@ export default function SettingsPage() {
 
   // Load settings on mount (client-side only)
   useEffect(() => {
-    // Load settings from localStorage
-    setSettings(SettingsManager.getSettings());
+    const loadSettings = async () => {
+      // First, try to load from database if auto-sync is enabled
+      const currentSettings = SettingsManager.getSettings();
 
-    // Load custom models from database (for persistence)
-    SettingsManager.loadCustomModelsFromDatabase().then((loaded) => {
-      if (loaded) {
-        // Reload settings after loading from database
-        setSettings(SettingsManager.getSettings());
+      // Check if auto-sync is enabled
+      if (currentSettings.preferences.autoSync) {
+        console.log("[Settings Page] Auto-sync enabled, loading from database...");
+        const result = await SettingsManager.loadSettingsFromDatabase();
+        if (result.success && result.loaded) {
+          console.log("[Settings Page] Settings loaded from database");
+        }
       }
-    }).catch((err) => {
-      console.error("[Settings Page] Failed to load custom models from database:", err);
-    });
 
-    setMounted(true);
+      // Always load settings from localStorage (either original or just loaded from DB)
+        setSettings(SettingsManager.getSettings());
+
+      setMounted(true);
+    };
+
+    loadSettings().catch((err) => {
+      console.error("[Settings Page] Failed to load settings:", err);
+      setMounted(true);
+    });
   }, []);
 
   // Combine predefined models with custom models
@@ -80,16 +90,19 @@ export default function SettingsPage() {
   const handleAddApiKey = (key: Omit<ApiKey, "id">) => {
     SettingsManager.addApiKey(key);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleDeleteApiKey = (id: string) => {
     SettingsManager.deleteApiKey(id);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleUpdateApiKey = (id: string, updates: Partial<ApiKey>) => {
     SettingsManager.updateApiKey(id, updates);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleToggleModel = (modelId: string, enabled: boolean) => {
@@ -102,26 +115,31 @@ export default function SettingsPage() {
       SettingsManager.setPredefinedModelEnabled(modelId, enabled);
     }
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleAddModel = (model: Omit<CustomModel, "id">) => {
     SettingsManager.addCustomModel(model);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleDeleteModel = (id: string) => {
     SettingsManager.deleteCustomModel(id);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleUpdateEvaluator = (config: Partial<EvaluatorConfig>) => {
     SettingsManager.updateEvaluator(config);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   const handleUpdatePreferences = (prefs: Partial<Preferences>) => {
     SettingsManager.updatePreferences(prefs);
     setSettings(SettingsManager.getSettings());
+    SettingsManager.autoSyncIfNeeded();
   };
 
   return (
@@ -163,6 +181,10 @@ export default function SettingsPage() {
               <Sliders className="h-4 w-4" />
               Preferences
             </TabsTrigger>
+            <TabsTrigger value="sync" className="flex items-center gap-2">
+              <Cloud className="h-4 w-4" />
+              Sync
+            </TabsTrigger>
           </TabsList>
 
           {/* API Keys Tab */}
@@ -172,7 +194,7 @@ export default function SettingsPage() {
                 <CardTitle>API Keys</CardTitle>
                 <p className="text-sm text-muted-foreground">
                   Store your API keys securely. Keys are saved in your browser&apos;s
-                  local storage and never sent to our servers.
+                  local storage and can be synced to the database for persistence.
                 </p>
               </CardHeader>
               <CardContent>
@@ -233,6 +255,11 @@ export default function SettingsPage() {
               preferences={settings.preferences}
               onUpdate={handleUpdatePreferences}
             />
+          </TabsContent>
+
+          {/* Sync Tab */}
+          <TabsContent value="sync" className="mt-4">
+            <SettingsSync />
           </TabsContent>
         </Tabs>
       </div>

@@ -25,6 +25,28 @@ import { RegressionResultsList } from "@/components/regression/RegressionResults
 import { AlertsPanel } from "@/components/regression/AlertsPanel";
 import type { Metadata } from "next";
 
+// Helper function to safely parse JSON with error handling
+function parseJsonSafely(jsonString: string | null | undefined): any[] | null {
+  if (!jsonString) return null;
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error("Failed to parse JSON:", error);
+    return null;
+  }
+}
+
+// Helper function to safely stringify JSON
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function stringifyJsonSafely(obj: any): string {
+  try {
+    return JSON.stringify(obj);
+  } catch (error) {
+    console.error("Failed to stringify JSON:", error);
+    return "{}";
+  }
+}
+
 export const metadata: Metadata = {
   title: "Regression Testing - LLM Benchmark",
   description: "Automated regression testing for LLM models - track performance over time",
@@ -110,8 +132,8 @@ async function getRegressionData() {
   return {
     baselines: baselines.map((b) => ({
       ...b,
-      modelIds: JSON.parse(b.modelIds),
-      scheduleConfig: b.scheduleConfig ? JSON.parse(b.scheduleConfig) : null,
+      modelIds: parseJsonSafely(b.modelIds),
+      scheduleConfig: parseJsonSafely(b.scheduleConfig),
     })),
     recentRuns,
     alerts,

@@ -301,12 +301,12 @@ export function BenchmarkBuilder({ categories, templates, collections }: Benchma
                 </div>
                 <div>
                   <Label htmlFor="collection">Collection (Optional)</Label>
-                  <Select value={collectionId} onValueChange={setCollectionId}>
+                  <Select value={collectionId || undefined} onValueChange={(val) => setCollectionId(val === "none" ? "" : val)}>
                     <SelectTrigger className="mt-1">
                       <SelectValue placeholder="Add to collection..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No collection</SelectItem>
+                      <SelectItem value="none">No collection</SelectItem>
                       {collections.map((col) => (
                         <SelectItem key={col.id} value={col.id}>
                           <div className="flex items-center gap-2">

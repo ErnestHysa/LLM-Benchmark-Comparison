@@ -2,6 +2,7 @@
  * Benchmark Run Page
  *
  * Allows users to select models and run a benchmark
+ * Now uses shared RealTimeProgress component for consistent UI
  */
 
 "use client";
@@ -13,26 +14,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Play, ChevronLeft, CheckCircle2, XCircle, Loader2, AlertCircle } from "lucide-react";
-import Link from "next/link";
 import { Breadcrumb } from "@/components/layout";
-import { type Model, type SettingsProvider } from "@/lib/settings";
-import { saveBenchmarkRun, type BenchmarkRunSummary } from "@/lib/storage/benchmark-history";
+import { RealTimeProgress } from "@/components/progress/RealTimeProgress";
+import { Play, Loader2, AlertCircle, Activity } from "lucide-react";
+import { type SettingsProvider } from "@/lib/settings";
+import { useToast } from "@/hooks/use-toast";
+import Link from "next/link";
+import { CardDescription } from "@/components/ui/card";
 
 interface Benchmark {
   id: string;
@@ -42,168 +30,76 @@ interface Benchmark {
   primaryCategory: string;
 }
 
-type ModelWithProvider = Model & {
+interface ModelWithProvider {
+  id: string;
+  name: string; // For custom models, this is the providerId (actual model ID like "z-ai/glm-4.5-air:free")
+  displayName?: string;
   provider: SettingsProvider;
-};
-
-// Provider colors
-const providerColors: Record<SettingsProvider, string> = {
-  OPENAI: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-  ANTHROPIC: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-  OPENROUTER: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-  CUSTOM: "bg-purple-500/10 text-purple-500 border-purple-500/20",
-};
-
-const providerNames: Record<SettingsProvider, string> = {
-  OPENAI: "OpenAI",
-  ANTHROPIC: "Anthropic",
-  OPENROUTER: "OpenRouter",
-  CUSTOM: "Custom",
-};
+  isCustom?: boolean;
+}
 
 export default function BenchmarkRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { toast } = useToast();
 
   const [benchmark, setBenchmark] = useState<Benchmark | null>(null);
   const [loading, setLoading] = useState(true);
   const [models, setModels] = useState<ModelWithProvider[]>([]);
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [evaluator, setEvaluator] = useState({
-    model: "gpt-4o",
-    provider: "OPENAI" as SettingsProvider,
-  });
-  const [evaluatorModelFromSettings, setEvaluatorModelFromSettings] = useState<{
-    model: string;
-    provider: SettingsProvider;
-  } | null>(null);
-  const [concurrency, setConcurrency] = useState(3);
-  const [timeoutSec, setTimeoutSec] = useState(600);
-
-  // Run state
   const [isRunning, setIsRunning] = useState(false);
-  const [runResults, setRunResults] = useState<any[]>([]);
+  const [benchmarkRunId, setBenchmarkRunId] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [showResults, setShowResults] = useState(false);
+  const [settings, setSettings] = useState<any>(null);
 
-  // Settings
-  const [apiKeys, setApiKeys] = useState<any[]>([]);
-
-  // Fetch benchmark and settings
+  // Fetch benchmark and models data
   useEffect(() => {
     async function fetchData() {
       try {
-        console.info("[Benchmark Run] Fetching benchmark:", id);
-
         // Fetch benchmark
         const benchmarkRes = await fetch(`/api/benchmarks/${id}`);
         if (!benchmarkRes.ok) {
-          console.error("[Benchmark Run] Benchmark not found:", id);
           setRunError("Benchmark not found");
           setLoading(false);
           return;
         }
-        const benchmarkResponse = await benchmarkRes.json();
-        const benchmarkData = benchmarkResponse.benchmark || benchmarkResponse;
-        setBenchmark(benchmarkData);
+        const benchmarkData = await benchmarkRes.json();
+        setBenchmark(benchmarkData.benchmark);
 
-        console.info("[Benchmark Run] Benchmark loaded:", benchmarkData);
-
-        // Get settings from localStorage
-        const settingsStr = localStorage.getItem("llm-benchmark-settings");
-        if (settingsStr) {
-          const settings = JSON.parse(settingsStr);
-          console.info("[Benchmark Run] Settings loaded:", {
-            hasApiKeys: settings.apiKeys?.length || 0,
-            hasCustomModels: settings.models?.length || 0,
-            disabledPredefinedModels: settings.disabledPredefinedModels || [],
-          });
-
-          // Set API keys
-          setApiKeys(settings.apiKeys || []);
-
-          // Set evaluator from settings
-          if (settings.evaluator) {
-            const evaluatorFromSettings = {
-              model: settings.evaluator.model || "gpt-4o",
-              provider: settings.evaluator.provider || "OPENAI",
-            };
-            setEvaluator(evaluatorFromSettings);
-            setEvaluatorModelFromSettings(evaluatorFromSettings);
-            console.info("[Benchmark Run] Evaluator from settings:", evaluatorFromSettings);
-          }
-
-          // Set preferences
-          if (settings.preferences) {
-            setConcurrency(settings.preferences.concurrency || 3);
-            setTimeoutSec(settings.preferences.timeoutSec || 600);
-          }
-
-          // Build models list (predefined + custom)
-          const PREDEFINED_MODELS = [
-            { id: "gpt-4o", name: "GPT-4o", provider: "OPENAI" as SettingsProvider },
-            { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OPENAI" as SettingsProvider },
-            { id: "gpt-4-turbo", name: "GPT-4 Turbo", provider: "OPENAI" as SettingsProvider },
-            { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", provider: "OPENAI" as SettingsProvider },
-            {
-              id: "claude-3-5-sonnet",
-              name: "Claude 3.5 Sonnet",
-              provider: "ANTHROPIC" as SettingsProvider,
-            },
-            {
-              id: "claude-3-opus",
-              name: "Claude 3 Opus",
-              provider: "ANTHROPIC" as SettingsProvider,
-            },
-            {
-              id: "claude-3-sonnet",
-              name: "Claude 3 Sonnet",
-              provider: "ANTHROPIC" as SettingsProvider,
-            },
-            {
-              id: "claude-3-haiku",
-              name: "Claude 3 Haiku",
-              provider: "ANTHROPIC" as SettingsProvider,
-            },
-          ];
-
-          const disabledSet = new Set(settings.disabledPredefinedModels || []);
-
-          const enabledPredefined = PREDEFINED_MODELS.filter((m) => !disabledSet.has(m.id)).map(
-            (m) => ({ ...m, isEnabled: true, isCustom: false as const })
-          );
-
-          const customModels = (settings.models || []).map((m: any) => ({
-            ...m,
-            isEnabled: m.isEnabled ?? true,
-            isCustom: true as const,
-          }));
-
-          // Filter to only enabled models
-          const allModels = [...enabledPredefined, ...customModels].filter((m) => m.isEnabled);
-
-          console.info("[Benchmark Run] Available models:", {
-            total: allModels.length,
-            predefined: enabledPredefined.length,
-            custom: customModels.length,
-            modelIds: allModels.map((m) => ({
-              id: m.id,
-              name: m.name,
-              provider: m.provider,
-            })),
-          });
-
-          setModels(allModels);
-
-          // Set default categories (with fallback)
-          const primaryCat = benchmarkData.primaryCategory || "CODING";
-          setSelectedCategories([primaryCat]);
+        // Fetch models (settings + predefined)
+        const settingsRes = await fetch("/api/settings");
+        if (!settingsRes.ok) {
+          setRunError("Failed to load settings");
+          return;
         }
+        const settings = await settingsRes.json();
+
+        // Build models list (predefined + custom)
+        const PREDEFINED_MODELS: ModelWithProvider[] = [
+          { id: "gpt-4o", name: "GPT-4o", provider: "OPENAI", isCustom: false },
+          { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OPENAI", isCustom: false },
+          {
+            id: "claude-3-5-sonnet-20241022",
+            name: "Claude 3.5 Sonnet",
+            provider: "ANTHROPIC",
+            isCustom: false,
+          },
+          {
+            id: "claude-3-5-haiku-20241022",
+            name: "Claude 3.5 Haiku",
+            provider: "ANTHROPIC",
+            isCustom: false,
+          },
+        ];
+
+        // Get custom models from settings (they are inside settings.settings.customModels)
+        const customModels = settings?.settings?.customModels || [];
+        const allModels = [...PREDEFINED_MODELS, ...customModels];
+        setModels(allModels);
+        setSettings(settings);
+        setLoading(false);
       } catch (error) {
-        console.error("[Benchmark Run] Error fetching data:", error);
-        setRunError("Failed to load benchmark");
-      } finally {
+        setRunError(error instanceof Error ? error.message : "Failed to load benchmark");
         setLoading(false);
       }
     }
@@ -211,395 +107,254 @@ export default function BenchmarkRunPage({ params }: { params: Promise<{ id: str
     fetchData();
   }, [id]);
 
-  // Handle model selection
+  // Clear benchmark run ID when navigating away
+  useEffect(() => {
+    return () => {
+      setBenchmarkRunId(null);
+      setIsRunning(false);
+    };
+  }, []);
+
+  // Toggle model selection
   const toggleModel = (modelId: string) => {
-    if (selectedModelIds.includes(modelId)) {
-      setSelectedModelIds(selectedModelIds.filter((id) => id !== modelId));
-    } else {
-      setSelectedModelIds([...selectedModelIds, modelId]);
-    }
+    setSelectedModelIds((prev) =>
+      prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]
+    );
   };
 
-  const selectAll = () => {
+  // Select all models
+  const selectAllModels = () => {
     setSelectedModelIds(models.map((m) => m.id));
   };
 
-  const clearAll = () => {
+  // Clear selection
+  const clearSelection = () => {
     setSelectedModelIds([]);
   };
 
-  // Handle run benchmark
+  // Run benchmark
   const handleRun = async () => {
     if (selectedModelIds.length === 0) {
-      setRunError("Please select at least one model");
-      setShowResults(true);
+      toast({
+        title: "No models selected",
+        description: "Please select at least one model to test.",
+        variant: "error",
+      });
       return;
     }
 
-    // Validate evaluator model
-    if (!evaluator.model || evaluator.model === "custom") {
-      setRunError(
-        "Invalid evaluator model. Please go to Settings → Evaluator and select a valid model (not 'Custom model...')."
-      );
-      setShowResults(true);
+    if (!benchmark) {
+      toast({
+        title: "Benchmark not loaded",
+        description: "Please wait for the benchmark to load.",
+        variant: "error",
+      });
       return;
     }
 
     setIsRunning(true);
-    setRunError(null);
-    setRunResults([]);
-
-    const startTime = Date.now();
 
     try {
-      const modelIdentifiers = selectedModelIds.map((modelId) => {
+      // Build model details for the request
+      // For custom models, we need to pass the provider and actual model ID (providerId)
+      const modelDetails = selectedModelIds.map((modelId) => {
         const model = models.find((m) => m.id === modelId);
-        return model?.isCustom ? (model as any).name : modelId;
+        return {
+          id: modelId,
+          provider: model?.provider || "OPENAI",
+          providerId: model?.isCustom ? model.name : modelId, // For custom models, name is the providerId
+        };
       });
 
-      console.info("[Benchmark Run] Starting benchmark run:", {
-        benchmarkId: id,
-        modelIds: selectedModelIds,
-        modelIdentifiers,
-        categories: selectedCategories,
-        evaluator: `${evaluator.provider}:${evaluator.model}`,
-        concurrency,
-        timeoutSec,
-      });
-
-      const apiKeysMap: Record<string, string> = {};
-      for (const apiKey of apiKeys) {
-        if (apiKey.isActive) {
-          const decoded = atob(apiKey.key);
-          apiKeysMap[apiKey.provider.toLowerCase()] = decoded;
-          console.info("[Benchmark Run] Using API key for provider:", {
-            provider: apiKey.provider,
-            hasKey: !!decoded,
-            keyPrefix: decoded.slice(0, 10) + "...",
-          });
+      // Extract API keys from settings - settings.apiKeys is an array of { provider, key, ... }
+      const apiKeysArray = settings?.settings?.apiKeys || [];
+      const apiKeys: Record<string, string> = {};
+      for (const apiKey of apiKeysArray) {
+        if (apiKey.provider && apiKey.key) {
+          // Decode base64 key
+          try {
+            const decodedKey = atob(apiKey.key);
+            apiKeys[apiKey.provider] = decodedKey;
+          } catch {
+            // If not base64, use as-is
+            apiKeys[apiKey.provider] = apiKey.key;
+          }
         }
       }
+
+      console.log("[Benchmark Run] Sending request with:", {
+        modelCount: selectedModelIds.length,
+        evaluator: settings?.settings?.evaluator?.model,
+        evaluatorProvider: settings?.settings?.evaluator?.provider,
+        apiKeysProviders: Object.keys(apiKeys),
+        hasApiKeys: Object.keys(apiKeys).length > 0,
+      });
 
       const response = await fetch("/api/benchmarks/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           benchmarkId: id,
-          modelIds: modelIdentifiers,
-          categories: selectedCategories,
-          evaluator: evaluator.model,
-          evaluatorProvider: evaluator.provider,
-          concurrency,
-          timeoutSec,
-          apiKeys: apiKeysMap,
+          modelIds: selectedModelIds,
+          models: modelDetails,
+          evaluator: settings?.settings?.evaluator?.model || "gpt-4o",
+          evaluatorProvider: settings?.settings?.evaluator?.provider || "OPENAI",
+          concurrency: settings?.settings?.concurrency || 3,
+          apiKeys,
         }),
       });
 
-      console.info("[Benchmark Run] Run API response status:", response.status);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || "Failed to start benchmark run");
+      }
 
       const data = await response.json();
-      console.info("[Benchmark Run] Run API response data:", data);
-
-      if (!response.ok) {
-        throw new Error(data.error?.message || "Failed to run benchmark");
-      }
-
-      setRunResults(data.models || []);
-      setShowResults(true);
-
-      // Save to local benchmark history
-      const modelResults = (data.models || []).map((m: any) => ({
-        modelId: m.modelId,
-        status: m.status as "COMPLETED" | "FAILED",
-        totalScore: m.totalScore ?? 0,
-        error: m.error,
-      }));
-      const completedModels = modelResults.filter((m: any) => m.status === "COMPLETED");
-      const topModel = completedModels.sort((a: any, b: any) => b.totalScore - a.totalScore)[0];
-
-      const runSummary: BenchmarkRunSummary = {
-        id: data.runId || crypto.randomUUID(),
-        timestamp: Date.now(),
-        duration: Date.now() - startTime,
-        benchmarkName: benchmark?.name || "Unknown",
-        benchmarkId: id,
-        modelsCount: modelResults.length,
-        completedCount: completedModels.length,
-        failedCount: modelResults.filter((m: any) => m.status === "FAILED").length,
-        topModel: topModel?.modelId,
-        topScore: topModel?.totalScore,
-        results: modelResults,
-      };
-      saveBenchmarkRun(runSummary);
-
-      // If successful, redirect to results page
-      if (data.runId) {
-        setTimeout(() => {
-          router.push(`/results/${data.runId}`);
-        }, 2000);
-      }
+      setBenchmarkRunId(data.runId);
+      toast({
+        title: "Benchmark started",
+        description: "Running benchmark against selected models.",
+      });
     } catch (error) {
-      console.error("[Benchmark Run] Error running benchmark:", error);
-      setRunError(error instanceof Error ? error.message : "Unknown error");
-      setShowResults(true);
-    } finally {
       setIsRunning(false);
+      setRunError(error instanceof Error ? error.message : "Failed to start benchmark run");
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!benchmark) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Card className="max-w-md">
-          <CardContent className="p-8 text-center">
-            <AlertCircle className="mx-auto mb-4 h-12 w-12 text-error" />
-            <h2 className="mb-2 text-xl font-bold">Benchmark Not Found</h2>
-            <p className="mb-4 text-muted-foreground">
-              The requested benchmark could not be found.
-            </p>
-            <Link href="/benchmarks">
-              <Button>Back to Benchmarks</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const breadcrumbItems = [
-    { label: "Home", href: "/" },
-    { label: "Benchmarks", href: "/benchmarks" },
-    { label: benchmark.name, href: `/benchmarks/${id}` },
-    { label: "Run" },
-  ];
-
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto py-8">
       {/* Breadcrumb */}
-      <div className="animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} />
+      <div className="mb-6">
+        <Breadcrumb
+          items={[
+            { label: "Home", href: "/" },
+            { label: "Benchmarks", href: "/benchmarks" },
+            { label: benchmark?.name || "Loading...", href: `/benchmarks/${id}` },
+            { label: "Run" },
+          ]}
+        />
       </div>
 
-      {/* Header */}
-      <div className="animate-fade-in-up">
-        <Link href={`/benchmarks/${id}`}>
-          <Button variant="ghost" size="sm" className="mb-4">
-            <ChevronLeft className="mr-1 h-4 w-4" />
-            Back to Benchmark
-          </Button>
-        </Link>
-        <h1 className="text-3xl font-bold text-foreground">Run Benchmark</h1>
-        <p className="mt-1 text-muted-foreground">{benchmark.name}</p>
-      </div>
-
-      <div className="animate-fade-in-up grid grid-cols-1 gap-6 delay-100 lg:grid-cols-3">
-        {/* Model Selection */}
-        <div className="space-y-4 lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Select Models</CardTitle>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={selectAll}>
-                    Select All
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={clearAll}>
-                    Clear All
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {models.length === 0 ? (
-                <p className="py-8 text-center text-muted-foreground">
-                  No models available. Add models in Settings.
-                </p>
-              ) : (
-                <div className="max-h-96 space-y-2 overflow-y-auto">
-                  {models.map((model) => (
-                    <div
-                      key={model.id}
-                      className="flex items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-surface-hover"
-                    >
-                      <Checkbox
-                        id={`model-${model.id}`}
-                        checked={selectedModelIds.includes(model.id)}
-                        onCheckedChange={() => toggleModel(model.id)}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <Label
-                          htmlFor={`model-${model.id}`}
-                          className="cursor-pointer truncate font-medium"
-                        >
-                          {model.isCustom ? (model as any).displayName || model.name : model.name}
-                        </Label>
-                        <p className="truncate font-mono text-xs text-muted-foreground">
-                          {model.id}
-                        </p>
-                      </div>
-                      <Badge variant="outline" className={providerColors[model.provider]}>
-                        {providerNames[model.provider]}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Selected Models Summary */}
-          {selectedModelIds.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">
-                  Selected Models ({selectedModelIds.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {selectedModelIds.map((modelId) => {
-                    const model = models.find((m) => m.id === modelId);
-                    return (
-                      <Badge key={modelId} variant="secondary">
-                        {model?.isCustom
-                          ? (model as any).displayName || model.name
-                          : model?.name || modelId}
-                      </Badge>
-                    );
-                  })}
-                </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Main Content */}
+        <div className="space-y-6 lg:col-span-2">
+          {loading ? (
+            <div className="flex min-h-screen items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : runError ? (
+            <Card className="mx-auto max-w-md">
+              <CardContent className="p-8 text-center">
+                <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-500" />
+                <h2 className="mb-4 text-xl font-bold">Error</h2>
+                <p className="text-muted-foreground">{runError}</p>
+                <Link href="/benchmarks" className="mt-4 inline-block">
+                  <Button>Back to Benchmarks</Button>
+                </Link>
               </CardContent>
             </Card>
-          )}
-        </div>
+          ) : !benchmark ? (
+            <div className="flex items-center justify-center">
+              <Card className="max-w-md">
+                <CardContent className="flex flex-col items-center p-8 text-center">
+                  <AlertCircle className="mb-4 h-12 w-12 text-muted-foreground" />
+                  <h2 className="mb-4 text-xl font-bold">Benchmark Not Found</h2>
+                  <p className="text-muted-foreground">
+                    The requested benchmark could not be found.
+                  </p>
+                  <Link href="/benchmarks" className="mt-4">
+                    <Button>Back to Benchmarks</Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <>
+              {/* Progress Card - Shows when running */}
+              {isRunning && benchmarkRunId && (
+                <Card className="lg:col-span-1">
+                  <RealTimeProgress
+                    benchmarkRunId={benchmarkRunId}
+                    onComplete={() => {
+                      // Navigate to results page after completion
+                      router.push(`/results/${benchmarkRunId}`);
+                    }}
+                  />
+                </Card>
+              )}
 
-        {/* Run Configuration */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Configuration</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Categories */}
-              <div className="space-y-2">
-                <Label>Categories</Label>
-                <div className="flex flex-wrap gap-2">
-                  <Badge
-                    variant={
-                      selectedCategories.includes(benchmark?.primaryCategory || "")
-                        ? "default"
-                        : "outline"
-                    }
-                    className="cursor-pointer"
-                    onClick={() => setSelectedCategories([benchmark?.primaryCategory || "CODING"])}
-                  >
-                    {(benchmark?.primaryCategory || "CODING").replace(/_/g, " ")}
-                  </Badge>
-                </div>
-              </div>
+              {/* Benchmark Info Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>{benchmark.name}</CardTitle>
+                  <CardDescription>{benchmark.description}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="mb-2 text-sm text-muted-foreground">
+                    <strong>Category:</strong> {benchmark.primaryCategory}
+                  </div>
+                  <div className="mb-4 text-sm text-muted-foreground">
+                    <strong>Prompt:</strong>
+                  </div>
+                  <p className="whitespace-pre-wrap break-all rounded bg-muted p-3 font-mono text-xs text-muted-foreground">
+                    {benchmark.prompt}
+                  </p>
+                </CardContent>
+              </Card>
 
-              {/* Evaluator */}
-              <div className="space-y-2">
-                <Label>Evaluator Model</Label>
-                <Select
-                  value={`${evaluator.provider}:${evaluator.model}`}
-                  onValueChange={(value) => {
-                    const parts = value.split(":");
-                    const provider = parts[0] ?? "OPENAI";
-                    const model = parts.slice(1).join(":") ?? "gpt-4o";
-                    setEvaluator({ model, provider: provider as SettingsProvider });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Configured evaluator from settings */}
-                    {evaluatorModelFromSettings && (
-                      <SelectItem
-                        value={`${evaluatorModelFromSettings.provider}:${evaluatorModelFromSettings.model}`}
+              {/* Model Selection */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Select Models</CardTitle>
+                  <CardDescription>Choose which models to test against</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="mb-4 flex gap-2">
+                    <Button variant="outline" onClick={selectAllModels}>
+                      Select All ({models.length})
+                    </Button>
+                    <Button variant="outline" onClick={clearSelection}>
+                      Clear All
+                    </Button>
+                  </div>
+
+                  <div className="max-h-96 space-y-2 overflow-y-auto">
+                    {models.map((model) => (
+                      <div
+                        key={model.id}
+                        className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:border-surface hover:bg-surface"
                       >
-                        {evaluatorModelFromSettings.model} (
-                        {providerNames[evaluatorModelFromSettings.provider]})
-                        {evaluatorModelFromSettings.provider === "OPENROUTER" && " ✓ Configured"}
-                      </SelectItem>
-                    )}
-                    {/* Common predefined evaluators */}
-                    <SelectItem value="OPENAI:gpt-4o">GPT-4o (OpenAI)</SelectItem>
-                    <SelectItem value="OPENAI:gpt-4o-mini">GPT-4o Mini (OpenAI)</SelectItem>
-                    <SelectItem value="ANTHROPIC:claude-3-5-sonnet">
-                      Claude 3.5 Sonnet (Anthropic)
-                    </SelectItem>
-                    <SelectItem value="OPENROUTER:anthropic/claude-3.5-sonnet">
-                      Claude 3.5 Sonnet (OpenRouter)
-                    </SelectItem>
-                    {/* Custom models that can be used as evaluators */}
-                    {models
-                      .filter((m) => m.provider === "OPENROUTER" || m.provider === "CUSTOM")
-                      .map((model) => (
-                        <SelectItem key={model.id} value={`${model.provider}:${model.name}`}>
-                          {model.isCustom ? (model as any).displayName || model.name : model.name} (
-                          {providerNames[model.provider]})
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                {evaluatorModelFromSettings &&
-                  evaluator.provider === evaluatorModelFromSettings.provider &&
-                  evaluator.model === evaluatorModelFromSettings.model && (
-                    <p className="text-xs text-muted-foreground">
-                      ✓ Using your configured evaluator from Settings
-                    </p>
-                  )}
-              </div>
-
-              {/* Concurrency */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Concurrency</Label>
-                  <span className="text-sm text-muted-foreground">{concurrency}</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={concurrency}
-                  onChange={(e) => setConcurrency(Number(e.target.value))}
-                  className="w-full"
-                />
-              </div>
-
-              {/* Timeout */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Timeout (seconds)</Label>
-                  <span className="text-sm text-muted-foreground">{timeoutSec}s</span>
-                </div>
-                <input
-                  type="range"
-                  min="60"
-                  max="3600"
-                  step="60"
-                  value={timeoutSec}
-                  onChange={(e) => setTimeoutSec(Number(e.target.value))}
-                  className="w-full"
-                />
-              </div>
+                        <Checkbox
+                          id={`model-${model.id}`}
+                          checked={selectedModelIds.includes(model.id)}
+                          onCheckedChange={() => toggleModel(model.id)}
+                        />
+                        <div className="min-w-0 flex-1 space-x-2">
+                          <div>
+                            <Label
+                              htmlFor={`model-${model.id}`}
+                              className="cursor-pointer font-medium"
+                            >
+                              {model.name}
+                            </Label>
+                            <Badge variant="outline">{model.provider}</Badge>
+                          </div>
+                          {model.isCustom && (
+                            <span className="ml-2 text-xs text-muted-foreground">(Custom)</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
 
               {/* Run Button */}
               <Button
-                className="w-full"
                 size="lg"
+                className="w-full"
+                disabled={!benchmark || selectedModelIds.length === 0 || isRunning}
                 onClick={handleRun}
-                disabled={isRunning || selectedModelIds.length === 0}
               >
                 {isRunning ? (
                   <>
@@ -614,83 +369,39 @@ export default function BenchmarkRunPage({ params }: { params: Promise<{ id: str
                 )}
               </Button>
 
-              {selectedModelIds.length === 0 && (
-                <p className="text-center text-xs text-muted-foreground">
-                  Select at least one model to run
-                </p>
+              {/* Link to Batch Progress */}
+              {isRunning && benchmarkRunId && (
+                <div className="mt-4">
+                  <a
+                    href="/batch?tab=progress"
+                    className="flex items-center gap-2 text-sm text-blue-500 hover:underline"
+                  >
+                    <Activity className="h-4 w-4" />
+                    View batch progress to see all running evaluations
+                  </a>
+                </div>
               )}
+            </>
+          )}
+        </div>
+
+        {/* Settings */}
+        <div className="space-y-6 lg:col-span-1">
+          <Card>
+            <CardHeader>
+              <CardTitle>Settings</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                Configure evaluator, concurrency, and timeout in Settings.
+              </div>
+              <Button variant="outline" onClick={() => router.push("/settings")}>
+                Open Settings
+              </Button>
             </CardContent>
           </Card>
         </div>
       </div>
-
-      {/* Results Dialog */}
-      <Dialog open={showResults} onOpenChange={setShowResults}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{runError ? "Run Failed" : "Run Complete"}</DialogTitle>
-            <DialogDescription>
-              {runError ? "There was an error running the benchmark" : "Redirecting to results..."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="max-h-60 overflow-y-auto">
-            {runError ? (
-              <div className="flex items-start gap-3 rounded-lg bg-error/10 p-4">
-                <XCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-error" />
-                <div>
-                  <p className="font-medium text-error">Error</p>
-                  <p className="text-sm text-muted-foreground">{runError}</p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {runResults.map((result) => (
-                  <div
-                    key={result.modelId}
-                    className="flex items-center justify-between rounded-lg border border-border p-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{result.modelId}</p>
-                      {result.error && (
-                        <p className="mt-1 truncate text-xs text-error" title={result.error}>
-                          {result.error}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {result.status === "COMPLETED" ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 text-success" />
-                          <span className="text-sm text-success">
-                            {result.totalScore?.toFixed(1)}%
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="h-4 w-4 text-error" />
-                          <span className="text-sm text-error">Failed</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowResults(false)}>
-              {runError ? "Close" : "Stay Here"}
-            </Button>
-            {!runError && (
-              <Button onClick={() => router.push(`/results/${runResults[0]?.runId}`)}>
-                View Results
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -151,7 +151,7 @@ export function getModelConfig(modelId: string): ModelConfig | undefined {
  * Handles:
  * - Predefined models (from PREDEFINED_MODELS)
  * - OpenRouter models (contain "/" in model ID like "meta-llama/llama-3-70b")
- * - Custom endpoints (must be registered separately)
+ * - Custom models from database (by ID or providerId)
  *
  * @param modelId - The model identifier
  * @returns The model provider, or undefined if not found
@@ -175,6 +175,19 @@ export function getProviderForModel(modelId: string): ModelProvider | undefined 
       provider: "openrouter",
     });
     return "openrouter";
+  }
+
+  // Check if this is a custom model ID (format: model-xxx)
+  // Custom models are stored in database with ID like "model-xxx" and have provider info
+  if (modelId.startsWith("model-")) {
+    // For custom models, we need to check the database asynchronously
+    // This will be handled by getProviderForModelAsync in the LLM index
+    console.info("[LLM Service] Detected custom model ID format:", {
+      modelId,
+      note: "Database lookup required",
+    });
+    // Return undefined here, but the async version will handle it
+    return undefined;
   }
 
   // Model not recognized

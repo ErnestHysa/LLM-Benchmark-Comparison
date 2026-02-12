@@ -95,6 +95,8 @@ function checkRateLimit(ip: string, maxRequests: number = 10, windowMs: number =
 async function executeModelRun(
   benchmark: { id: string; name: string; prompt: string },
   modelId: string,
+  actualModelId: string, // The actual model ID to call (e.g., "z-ai/glm-4.5-air:free")
+  modelProvider: string, // The provider (OPENAI, ANTHROPIC, OPENROUTER, CUSTOM)
   categories: string[],
   evaluator: string,
   evaluatorProvider: string,
@@ -110,6 +112,8 @@ async function executeModelRun(
 }> {
   console.info("[Run API] Executing model run:", {
     modelId,
+    actualModelId,
+    modelProvider,
     evaluator: `${evaluatorProvider}:${evaluator}`,
     hasApiKeys: !!apiKeys,
     timeoutMs,
@@ -146,18 +150,25 @@ async function executeModelRun(
       signal.addEventListener("abort", onParentAbort, { once: true });
     }
 
+    // Build API keys for the model provider
+    // The model's provider is in modelProvider (e.g., "OPENAI", "OPENROUTER")
+    // We need to pass the correct API key to the chat function
+    const modelApiKeys: Record<string, string> | undefined =
+      apiKeys && apiKeys[modelProvider] ? { [modelProvider]: apiKeys[modelProvider] } : undefined;
+
     const llmResponse = await retryWithBackoff(
-      () => chat(
-        modelId,
-        messages,
-        {
-          temperature: 0.7,
-          maxTokens: 65536, // 2x+ increase - models were stopping mid-output
-          timeoutMs,
-          abortSignal: abortController.signal, // Pass abort signal to chat
-        },
-        apiKeys
-      ),
+      () =>
+        chat(
+          actualModelId,
+          messages,
+          {
+            temperature: 0.7,
+            maxTokens: 65536, // 2x+ increase - models were stopping mid-output
+            timeoutMs,
+            abortSignal: abortController.signal, // Pass abort signal to chat
+          },
+          modelApiKeys
+        ),
       {
         maxRetries: 3,
         baseDelay: 2000,
@@ -166,7 +177,9 @@ async function executeModelRun(
           if (signal?.aborted || abortController.signal.aborted) {
             throw new Error("Run cancelled");
           }
-          console.warn(`[Run API] Retry ${attempt}/3 for model ${modelId}: ${error.message}. Next retry in ${delay}ms`);
+          console.warn(
+            `[Run API] Retry ${attempt}/3 for model ${modelId}: ${error.message}. Next retry in ${delay}ms`
+          );
         },
       }
     ).finally(() => {
@@ -287,6 +300,7 @@ export async function POST(request: NextRequest) {
     const {
       benchmarkId,
       modelIds,
+      models: modelDetails,
       categories,
       evaluator,
       evaluatorProvider,
@@ -294,6 +308,17 @@ export async function POST(request: NextRequest) {
       timeoutSec,
       apiKeys,
     } = validationResult.data;
+
+    // Create a map of modelId -> model details for quick lookup
+    const modelDetailsMap = new Map<string, { provider: string; providerId: string }>();
+    if (modelDetails) {
+      for (const model of modelDetails) {
+        modelDetailsMap.set(model.id, {
+          provider: model.provider,
+          providerId: model.providerId,
+        });
+      }
+    }
 
     // Get benchmark
     const benchmark = await prisma.benchmark.findUnique({
@@ -370,18 +395,22 @@ export async function POST(request: NextRequest) {
         }
 
         const batch = modelIds.slice(i, i + concurrency);
-        const batchPromises = batch.map((modelId) =>
-          executeModelRun(
+        const batchPromises = batch.map((modelId) => {
+          // Get model details if available
+          const details = modelDetailsMap.get(modelId);
+          return executeModelRun(
             benchmark,
             modelId,
+            details?.providerId || modelId, // Use providerId if available, otherwise use modelId
+            details?.provider || "OPENAI", // Use provided provider or default to OPENAI
             categoriesToEvaluate,
             evaluator,
             evaluatorProvider,
             apiKeys,
             timeoutMs,
-            signal  // Pass the abort signal through
-          )
-        );
+            signal // Pass the abort signal through
+          );
+        });
 
         const batchResults = await Promise.all(batchPromises);
         results.push(...batchResults);

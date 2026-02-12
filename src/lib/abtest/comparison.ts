@@ -107,10 +107,21 @@ export function diffToHTML(diffs: DiffResult[]): string {
   }).join("");
 }
 
+/**
+ * Safely escape HTML special characters to prevent XSS
+ * Works in both browser and Node.js environments
+ */
 function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+  const htmlEscapes: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+    "/": "&#x2F;",
+  };
+
+  return String(text).replace(/[&<>"'/]/g, (char) => htmlEscapes[char] || char);
 }
 
 /**

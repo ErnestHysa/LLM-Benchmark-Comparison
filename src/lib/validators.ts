@@ -37,12 +37,7 @@ export type RunStatus = z.infer<typeof RunStatusEnum>;
 /**
  * Model provider enum
  */
-export const ModelProviderEnum = z.enum([
-  "OPENAI",
-  "ANTHROPIC",
-  "OPENROUTER",
-  "CUSTOM",
-]);
+export const ModelProviderEnum = z.enum(["OPENAI", "ANTHROPIC", "OPENROUTER", "CUSTOM"]);
 
 export type ModelProvider = z.infer<typeof ModelProviderEnum>;
 
@@ -64,6 +59,15 @@ export const BenchmarkParamsSchema = z.object({
 });
 
 /**
+ * Model details for benchmark run
+ */
+export const ModelDetailsSchema = z.object({
+  id: z.string(),
+  provider: ModelProviderEnum,
+  providerId: z.string(), // The actual model ID to use for API calls (e.g., "z-ai/glm-4.5-air:free")
+});
+
+/**
  * Run benchmark request schema
  */
 export const RunBenchmarkSchema = z.object({
@@ -72,17 +76,13 @@ export const RunBenchmarkSchema = z.object({
     .array(z.string().min(1))
     .min(1, "At least one model must be selected")
     .max(10, "Cannot run more than 10 models at once"),
-  categories: z
-    .array(CategoryTypeEnum)
-    .min(1, "At least one category must be selected")
-    .optional(),
+  models: z.array(ModelDetailsSchema).optional(), // Optional model details for custom models
+  categories: z.array(CategoryTypeEnum).min(1, "At least one category must be selected").optional(),
   evaluator: z.string().min(1).default("gpt-4o"),
   evaluatorProvider: ModelProviderEnum.default("OPENAI"),
   concurrency: z.number().min(1).max(10).default(3),
   timeoutSec: z.number().min(10).max(3600).optional().default(600),
-  apiKeys: z
-    .record(z.string())
-    .optional(),
+  apiKeys: z.record(z.string()).optional(),
 });
 
 export type RunBenchmarkRequest = z.infer<typeof RunBenchmarkSchema>;

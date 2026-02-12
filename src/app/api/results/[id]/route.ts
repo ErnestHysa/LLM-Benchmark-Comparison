@@ -5,11 +5,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { ResultParamsSchema } from "@/lib/validators";
-import { errorResponse, getStatusCode, NotFoundError } from "@/lib/errors";
-import { logError } from "@/lib/errors";
-import { calculateRankings } from "@/lib/scoring";
+import { prisma } from '@/lib/prisma';
+import { ResultParamsSchema } from '@/lib/validators';
+import { errorResponse, getStatusCode, NotFoundError } from '@/lib/errors';
+import { logError } from '@/lib/errors';
+import { calculateRankings } from '@/lib/scoring';
 
 interface RouteContext {
   params: Promise<{ id: string }>;

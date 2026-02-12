@@ -58,7 +58,7 @@ async function getLeaderboardData(_category?: string, timeFilter?: string) {
   });
 
   // Calculate average scores per model
-  const modelScores = new Map<string, { totalScore: number; count: number; runs: string[] }>();
+  const modelScores = new Map<string, { totalScore: number; count: number }>();
 
   for (const run of modelRuns) {
     const avgScore =
@@ -72,7 +72,7 @@ async function getLeaderboardData(_category?: string, timeFilter?: string) {
       existing.totalScore += avgScore;
       existing.count += 1;
     } else {
-      modelScores.set(run.modelId, { totalScore: avgScore, count: 1, runs: [] });
+      modelScores.set(run.modelId, { totalScore: avgScore, count: 1 });
     }
   }
 

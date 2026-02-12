@@ -3,7 +3,6 @@ import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { LayoutWrapper } from "@/components/layout/LayoutWrapper";
-import { ErrorBoundary, AsyncErrorBoundary } from "@/components/errors/ErrorBoundary";
 
 const inter = Inter({
   variable: "--font-display",
@@ -50,11 +49,7 @@ export default function RootLayout({
           Skip to main content
         </a>
 
-        <ErrorBoundary>
-          <AsyncErrorBoundary>
-            <LayoutWrapper>{children}</LayoutWrapper>
-          </AsyncErrorBoundary>
-        </ErrorBoundary>
+        <LayoutWrapper>{children}</LayoutWrapper>
 
         {/* Toast notifications */}
         <Toaster />

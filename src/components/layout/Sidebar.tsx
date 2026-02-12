@@ -20,12 +20,14 @@ import {
   BarChart3,
   Shield,
   Scale,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/benchmarks", label: "Benchmarks", icon: Trophy },
+  { href: "/batch", label: "Batch Run", icon: Layers },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/regression", label: "Regression", icon: TrendingUp },

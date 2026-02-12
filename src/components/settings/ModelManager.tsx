@@ -260,7 +260,7 @@ export function ModelManager({
                         </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 font-mono">
-                        {model.id}
+                        {model.id.replace('model-', '')}
                       </p>
                     </div>
                     <Switch
@@ -316,7 +316,7 @@ export function ModelManager({
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
-                        {model.name}
+                        {model.name.replace('model-', '')}
                       </p>
                       {model.description && (
                         <p className="text-xs text-muted-foreground mt-1">

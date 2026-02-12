@@ -144,10 +144,22 @@ function parseEvaluationResponse(response: string): {
   }>;
   overallConfidence: number;
 } {
-  // Try to extract JSON from response
-  const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/) || response.match(/\{[\s\S]*\}/);
+  // Try to extract JSON from response - try multiple patterns
+  let jsonStr = response;
 
-  if (!jsonMatch) {
+  // Extract from markdown code block if present
+  const codeBlockMatch = response.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    jsonStr = codeBlockMatch[1];
+  } else {
+    // Try to find JSON object boundaries
+    const braceMatch = response.match(/\{[\s\S]*\}/);
+    if (braceMatch) {
+      jsonStr = braceMatch[0];
+    }
+  }
+
+  if (!jsonStr || jsonStr.trim().length === 0) {
     console.error("[Evaluator] No JSON found in response", {
       responseLength: response.length,
       responsePreview: response.slice(0, 200),
@@ -156,8 +168,34 @@ function parseEvaluationResponse(response: string): {
   }
 
   try {
-    const jsonStr = jsonMatch[1] || jsonMatch[0];
-    const parsed = JSON.parse(jsonStr);
+    // Attempt to repair incomplete JSON by finding balanced braces
+    let repairedJson = jsonStr.trim();
+
+    // If JSON ends abruptly, try to complete it
+    const openBraces = (repairedJson.match(/\{/g) || []).length;
+    const closeBraces = (repairedJson.match(/\}/g) || []).length;
+    const openBrackets = (repairedJson.match(/\[/g) || []).length;
+    const closeBrackets = (repairedJson.match(/\]/g) || []).length;
+
+    // Add missing closing braces/brackets
+    if (openBraces > closeBraces) {
+      repairedJson += "}".repeat(openBraces - closeBraces);
+    }
+    if (openBrackets > closeBrackets) {
+      repairedJson += "]".repeat(openBrackets - closeBrackets);
+    }
+
+    // Handle incomplete strings (ending with quote but no closing quote)
+    if (repairedJson.endsWith('"') || repairedJson.endsWith("',")) {
+      // Remove trailing incomplete property
+      const lastComma = repairedJson.lastIndexOf(',');
+      if (lastComma > repairedJson.lastIndexOf('}')) {
+        repairedJson = repairedJson.substring(0, lastComma);
+        repairedJson += "\n  }\n]";
+      }
+    }
+
+    const parsed = JSON.parse(repairedJson);
 
     // Validate the parsed structure has required fields
     if (!parsed.evaluations || !Array.isArray(parsed.evaluations)) {
@@ -174,6 +212,11 @@ function parseEvaluationResponse(response: string): {
       if (!evaluationItem.category || !Array.isArray(evaluationItem.metrics)) {
         throw new LLMError("Evaluator", "Invalid evaluation structure: missing category or metrics");
       }
+
+      // Filter out incomplete metrics (missing score or reasoning)
+      evaluationItem.metrics = evaluationItem.metrics.filter((m: any) =>
+        typeof m.score === "number" && typeof m.reasoning === "string"
+      );
     }
 
     return parsed;
@@ -184,7 +227,8 @@ function parseEvaluationResponse(response: string): {
     }
     console.error("[Evaluator] JSON parse error", {
       error: error instanceof Error ? error.message : String(error),
-      jsonPreview: jsonMatch[1]?.slice(0, 200) || jsonMatch[0]?.slice(0, 200),
+      jsonPreview: jsonStr.slice(0, 200),
+      jsonLength: jsonStr.length,
     });
     throw new LLMError("Evaluator", "Failed to parse evaluation JSON", error);
   }
@@ -302,11 +346,41 @@ ${metricDetails}`;
 
   const response = await client.chat(evaluatorModelId, messages, {
     temperature: 0.3, // Lower temperature for more consistent evaluations
-    maxTokens: 16384, // 2x increase - ensure evaluator has enough tokens for detailed analysis
+    maxTokens: 32768, // 4x increase - ensure evaluator has enough tokens for detailed analysis with multiple categories
   });
 
-  // Parse evaluation
-  const evaluation = parseEvaluationResponse(response.content);
+  // Parse evaluation - if parsing fails, retry with simpler prompt
+  let evaluation;
+  try {
+    evaluation = parseEvaluationResponse(response.content);
+  } catch (parseError) {
+    console.warn("[Evaluator] Initial parse failed, retrying with simplified prompt:", parseError);
+
+    // Retry with a much simpler prompt that focuses on just getting scores
+    const simplifiedPrompt = `Evaluate this output for the prompt: "${prompt.slice(0, 200)}..."
+
+Output: ${output.slice(0, 1000)}
+
+Categories: ${categories.join(", ")}
+
+Return ONLY valid JSON:
+{
+  "evaluations": [
+    {"category": "${categories[0]}", "metrics": [{"name": "Overall", "score": 85, "reasoning": "Brief reason", "confidence": 0.8}]}
+  ],
+  "overallConfidence": 0.8
+}`;
+
+    const retryResponse = await client.chat(evaluatorModelId, [
+      { role: "system", content: "You are an evaluator. Return only valid JSON." },
+      { role: "user", content: simplifiedPrompt }
+    ], {
+      temperature: 0.2,
+      maxTokens: 4096,
+    });
+
+    evaluation = parseEvaluationResponse(retryResponse.content);
+  }
 
   // Build category evaluations
   const categoryEvaluations: CategoryEvaluation[] = [];
