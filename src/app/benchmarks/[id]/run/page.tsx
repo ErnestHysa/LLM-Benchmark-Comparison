@@ -153,6 +153,10 @@ export default function BenchmarkRunPage({ params }: { params: Promise<{ id: str
     }
 
     setIsRunning(true);
+    setRunError(null);
+
+    // Scroll to top to see progress
+    window.scrollTo({ top: 0, behavior: "smooth" });
 
     try {
       // Build model details for the request
@@ -270,16 +274,37 @@ export default function BenchmarkRunPage({ params }: { params: Promise<{ id: str
             </div>
           ) : (
             <>
-              {/* Progress Card - Shows when running */}
+              {/* Progress Card - Shows when running - STICKY at top */}
               {isRunning && benchmarkRunId && (
-                <Card className="lg:col-span-1">
-                  <RealTimeProgress
-                    benchmarkRunId={benchmarkRunId}
-                    onComplete={() => {
-                      // Navigate to results page after completion
-                      router.push(`/results/${benchmarkRunId}`);
-                    }}
-                  />
+                <div className="sticky top-4 z-50 mb-6">
+                  <Card className="border-2 border-blue-500 shadow-lg">
+                    <RealTimeProgress
+                      benchmarkRunId={benchmarkRunId}
+                      onComplete={() => {
+                        // Navigate to results page after completion
+                        router.push(`/results/${benchmarkRunId}`);
+                      }}
+                      onError={(error) => {
+                        setRunError(error);
+                        setIsRunning(false);
+                      }}
+                    />
+                  </Card>
+                </div>
+              )}
+
+              {/* Error Display */}
+              {runError && (
+                <Card className="mb-6 border-2 border-red-500 bg-red-50">
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-6 w-6 flex-shrink-0 text-red-500" />
+                      <div>
+                        <h3 className="font-semibold text-red-700">Error</h3>
+                        <p className="mt-1 text-red-600">{runError}</p>
+                      </div>
+                    </div>
+                  </CardContent>
                 </Card>
               )}
 

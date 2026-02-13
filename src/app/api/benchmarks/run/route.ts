@@ -19,6 +19,14 @@ import { chat } from "@/lib/llm";
 import { evaluateOutput, getCategoryMetrics } from "@/lib/llm/evaluator";
 import { retryWithBackoff } from "@/lib/utils/retry";
 import { classifyBenchmarkError, getBenchmarkErrorMessage } from "@/lib/utils/errors";
+import {
+  broadcastProgress,
+  broadcastLog,
+  broadcastComplete,
+  broadcastModelStart,
+  broadcastModelComplete,
+  broadcastModelFailure,
+} from "@/lib/realtime/progress";
 
 /**
  * Simple in-memory rate limiter per IP
@@ -90,7 +98,7 @@ function checkRateLimit(ip: string, maxRequests: number = 10, windowMs: number =
 }
 
 /**
- * Execute model run with timeout
+ * Execute model run with timeout and progress tracking
  */
 async function executeModelRun(
   benchmark: { id: string; name: string; prompt: string },
@@ -100,6 +108,9 @@ async function executeModelRun(
   categories: string[],
   evaluator: string,
   evaluatorProvider: string,
+  benchmarkRunId: string, // For progress tracking
+  modelIndex: number, // Current model index (0-based)
+  totalModels: number, // Total number of models
   apiKeys?: Record<string, string>,
   timeoutMs?: number,
   signal?: AbortSignal
@@ -117,6 +128,25 @@ async function executeModelRun(
     evaluator: `${evaluatorProvider}:${evaluator}`,
     hasApiKeys: !!apiKeys,
     timeoutMs,
+    benchmarkRunId,
+    modelIndex,
+    totalModels,
+  });
+
+  // Broadcast model start
+  broadcastModelStart(
+    benchmarkRunId,
+    actualModelId,
+    modelIndex,
+    totalModels,
+    modelProvider,
+    benchmark.name
+  );
+  broadcastLog({
+    benchmarkRunId,
+    level: "info",
+    message: `Starting ${actualModelId} (${modelIndex + 1}/${totalModels})`,
+    timestamp: new Date().toISOString(),
   });
 
   try {
@@ -215,13 +245,30 @@ async function executeModelRun(
       categories,
       evaluatorModelId: evaluator,
       evaluatorProvider: evaluatorProvider.toLowerCase() as any,
-      evaluatorApiKey: apiKeys?.[evaluatorProvider.toLowerCase()],
+      evaluatorApiKey: apiKeys?.[evaluatorProvider.toLowerCase()] || undefined,
       benchmarkId: benchmark.id,
     });
 
     console.info("[Run API] Evaluation completed for model:", {
       modelId,
       totalScore: evaluation?.totalScore,
+    });
+
+    // Broadcast model completion
+    broadcastModelComplete(
+      benchmarkRunId,
+      actualModelId,
+      modelIndex,
+      totalModels,
+      evaluation?.totalScore,
+      modelProvider,
+      benchmark.name
+    );
+    broadcastLog({
+      benchmarkRunId,
+      level: "info",
+      message: `Completed ${actualModelId} - Score: ${evaluation?.totalScore?.toFixed(1) || "N/A"}`,
+      timestamp: new Date().toISOString(),
     });
 
     return {
@@ -234,6 +281,12 @@ async function executeModelRun(
     // Check if this was a cancellation
     if (signal?.aborted || (error instanceof Error && error.message === "Run cancelled")) {
       console.info("[Run API] Model run cancelled for:", modelId);
+      broadcastLog({
+        benchmarkRunId,
+        level: "warning",
+        message: `Cancelled ${actualModelId}`,
+        timestamp: new Date().toISOString(),
+      });
       return {
         modelId,
         output: "",
@@ -250,6 +303,24 @@ async function executeModelRun(
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
+
+    // Broadcast model failure
+    broadcastModelFailure(
+      benchmarkRunId,
+      actualModelId,
+      modelIndex,
+      totalModels,
+      userMessage,
+      modelProvider,
+      benchmark.name
+    );
+    broadcastLog({
+      benchmarkRunId,
+      level: "error",
+      message: `Failed ${actualModelId}: ${userMessage}`,
+      timestamp: new Date().toISOString(),
+    });
+
     return {
       modelId,
       output: "",
@@ -367,211 +438,285 @@ export async function POST(request: NextRequest) {
       return { benchmarkRun: run, modelRuns: runs };
     });
 
-    // Execute runs in parallel with concurrency limit
-    const timeoutMs = timeoutSec ? timeoutSec * 1000 : 600000; // 10 min default
-    const results: Array<{
-      modelId: string;
-      output: string;
-      tokensUsed?: number;
-      evaluation: any;
-      error?: string;
-    }> = [];
+    // Return response immediately so client can connect to SSE and see progress
+    // The benchmark execution will continue in the background
+    const runId = benchmarkRun.id;
 
-    // Process with concurrency limit
-    // Get the AbortSignal from the request to support cancellation
-    const signal = request.signal;
+    // Start execution asynchronously (don't await)
+    (async () => {
+      try {
+        // Execute runs in parallel with concurrency limit
+        const timeoutMs = timeoutSec ? timeoutSec * 1000 : 600000; // 10 min default
+        const results: Array<{
+          modelId: string;
+          output: string;
+          tokensUsed?: number;
+          evaluation: any;
+          error?: string;
+        }> = [];
 
-    // Set up a listener to detect if the client disconnects
-    const onAbort = () => {
-      console.info("[Run API] Request aborted by client", { benchmarkRunId: benchmarkRun.id });
-    };
-    signal.addEventListener("abort", onAbort);
+        // Process with concurrency limit
+        // Get the AbortSignal from the request to support cancellation
+        const signal = request.signal;
 
-    try {
-      for (let i = 0; i < modelIds.length; i += concurrency) {
-        // Check if request was aborted before starting next batch
-        if (signal.aborted) {
-          throw new Error("Benchmark run cancelled by user");
+        // Set up a listener to detect if the client disconnects
+        const onAbort = () => {
+          console.info("[Run API] Request aborted by client", { benchmarkRunId: runId });
+        };
+        signal.addEventListener("abort", onAbort);
+
+        // Initialize overall progress
+        const totalModels = modelIds.length;
+        broadcastProgress({
+          benchmarkRunId: runId,
+          stepName: "Initializing benchmark run",
+          stepNumber: 0,
+          totalSteps: totalModels,
+          percentage: 0,
+          status: "running",
+          message: `Running ${totalModels} models with concurrency ${concurrency}`,
+          currentBenchmark: benchmark.name,
+          totalModels: totalModels,
+        } as any);
+
+        try {
+          let completedModels = 0;
+
+          for (let i = 0; i < modelIds.length; i += concurrency) {
+            // Check if request was aborted before starting next batch
+            if (signal.aborted) {
+              throw new Error("Benchmark run cancelled by user");
+            }
+
+            const batch = modelIds.slice(i, i + concurrency);
+            const batchPromises = batch.map((modelId, batchIndex) => {
+              // Get model details if available
+              const details = modelDetailsMap.get(modelId);
+              const modelIndex = i + batchIndex; // Global model index
+
+              return executeModelRun(
+                benchmark,
+                modelId,
+                details?.providerId || modelId, // Use providerId if available, otherwise use modelId
+                details?.provider || "OPENAI", // Use provided provider or default to OPENAI
+                categoriesToEvaluate,
+                evaluator,
+                evaluatorProvider,
+                benchmarkRun.id, // Pass benchmark run ID for progress tracking
+                modelIndex, // Current model index
+                totalModels, // Total number of models
+                apiKeys,
+                timeoutMs,
+                signal // Pass the abort signal through
+              );
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            results.push(...batchResults);
+
+            completedModels += batch.length;
+
+            // Broadcast overall progress
+            const percentage = (completedModels / totalModels) * 100;
+            broadcastProgress({
+              benchmarkRunId: benchmarkRun.id,
+              stepName: `Completed batch ${Math.floor(i / concurrency) + 1}`,
+              stepNumber: completedModels,
+              totalSteps: totalModels,
+              percentage,
+              status: "running",
+              message: `${completedModels}/${totalModels} models completed`,
+              currentBenchmark: benchmark.name,
+              totalModels: totalModels,
+            } as any);
+          }
+
+          // Determine if overall benchmark succeeded
+          // Success = at least one model completed without error
+          const hasSuccessfulModels = results.some((r) => !r.error);
+          const allModelsFailed = results.every((r) => r.error && r.error !== "CANCELLED");
+          const allModelsCancelled = results.every((r) => r.error === "CANCELLED");
+
+          // Broadcast completion with appropriate success status
+          broadcastComplete(benchmarkRun.id, hasSuccessfulModels, {
+            totalModels,
+            completedModels,
+            allSuccessful: !results.some((r) => r.error),
+            allFailed: allModelsFailed,
+            allCancelled: allModelsCancelled,
+            results: results.map((r) => ({
+              modelId: r.modelId,
+              score: r.evaluation?.totalScore,
+              error: r.error,
+              status: r.error ? (r.error === "CANCELLED" ? "cancelled" : "failed") : "completed",
+            })),
+          });
+        } finally {
+          // Clean up the abort listener
+          signal.removeEventListener("abort", onAbort);
         }
 
-        const batch = modelIds.slice(i, i + concurrency);
-        const batchPromises = batch.map((modelId) => {
-          // Get model details if available
-          const details = modelDetailsMap.get(modelId);
-          return executeModelRun(
-            benchmark,
-            modelId,
-            details?.providerId || modelId, // Use providerId if available, otherwise use modelId
-            details?.provider || "OPENAI", // Use provided provider or default to OPENAI
-            categoriesToEvaluate,
-            evaluator,
-            evaluatorProvider,
-            apiKeys,
-            timeoutMs,
-            signal // Pass the abort signal through
-          );
-        });
+        // Save results to database
+        for (const result of results) {
+          const modelRun = modelRuns.find((mr) => mr.modelId === result.modelId);
+          if (!modelRun) continue;
 
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults);
-      }
-    } finally {
-      // Clean up the abort listener
-      signal.removeEventListener("abort", onAbort);
-    }
+          if (result.error) {
+            // Check if this was a cancellation
+            if (result.error === "CANCELLED") {
+              await prisma.modelRun.update({
+                where: { id: modelRun.id },
+                data: {
+                  status: "CANCELLED",
+                  output: "Run cancelled by user",
+                  completedAt: new Date(),
+                },
+              });
+              continue;
+            }
 
-    // Save results to database
-    for (const result of results) {
-      const modelRun = modelRuns.find((mr) => mr.modelId === result.modelId);
-      if (!modelRun) continue;
+            // Mark as failed
+            await prisma.modelRun.update({
+              where: { id: modelRun.id },
+              data: {
+                status: "FAILED",
+                output: result.error,
+                completedAt: new Date(),
+              },
+            });
+            continue;
+          }
 
-      if (result.error) {
-        // Check if this was a cancellation
-        if (result.error === "CANCELLED") {
+          // Update model run with output
           await prisma.modelRun.update({
             where: { id: modelRun.id },
             data: {
-              status: "CANCELLED",
-              output: "Run cancelled by user",
+              status: "COMPLETED",
+              output: result.output,
+              tokensUsed: result.tokensUsed,
               completedAt: new Date(),
             },
           });
-          continue;
+
+          // Save category scores
+          const { categoryEvaluations } = result.evaluation;
+
+          for (const catEval of categoryEvaluations) {
+            // Get or create category
+            let category = await prisma.benchmarkCategory.findFirst({
+              where: { name: catEval.category },
+            });
+
+            if (!category) {
+              category = await prisma.benchmarkCategory.create({
+                data: {
+                  name: catEval.category,
+                  description: `${catEval.category} evaluation category`,
+                },
+              });
+            }
+
+            // Save category score
+            await prisma.categoryScore.create({
+              data: {
+                modelRunId: modelRun.id,
+                categoryId: category.id,
+                totalScore: catEval.totalScore,
+              },
+            });
+
+            // Save metric scores
+            for (const metric of catEval.metrics) {
+              // Get or create metric definition
+              let metricDef = await prisma.categoryMetric.findFirst({
+                where: {
+                  categoryId: category.id,
+                  name: metric.name,
+                },
+              });
+
+              if (!metricDef) {
+                const metrics = getCategoryMetrics(catEval.category);
+                const metricConfig = metrics.find((m) => m.name === metric.name);
+                metricDef = await prisma.categoryMetric.create({
+                  data: {
+                    categoryId: category.id,
+                    name: metric.name,
+                    description: `${metric.name} evaluation metric`,
+                    weight: metricConfig?.weight ?? 1.0,
+                  },
+                });
+              }
+
+              // Create score record
+              const scoreRecord = await prisma.score.create({
+                data: {
+                  modelRunId: modelRun.id,
+                  categoryId: category.id,
+                  metricId: metricDef.id,
+                  value: metric.score,
+                  aiConfidence: metric.confidence,
+                },
+              });
+
+              // Create metric score (for detailed breakdown)
+              await prisma.metricScore.create({
+                data: {
+                  scoreId: scoreRecord.id,
+                  metricId: metricDef.id,
+                  value: metric.score,
+                  explanation: metric.reasoning,
+                },
+              });
+            }
+          }
         }
 
-        // Mark as failed
-        await prisma.modelRun.update({
-          where: { id: modelRun.id },
+        // Update benchmark run status
+        const hasSuccesses = results.some((r) => !r.error);
+        const hasCancelled = results.some((r) => r.error === "CANCELLED");
+
+        // Determine appropriate status based on results
+        // Note: Using COMPLETED for partial failures since PARTIAL is not in the RunStatus enum
+        // Consider adding PARTIAL status to schema for better tracking
+        let finalStatus: "COMPLETED" | "FAILED" | "CANCELLED" = "FAILED";
+        if (hasCancelled && !hasSuccesses) {
+          finalStatus = "CANCELLED"; // All were cancelled
+        } else if (hasSuccesses) {
+          finalStatus = "COMPLETED"; // All successes or mixed (partial failures)
+        } else {
+          finalStatus = "FAILED"; // All models failed
+        }
+
+        // Update benchmark run status
+        await prisma.benchmarkRun.update({
+          where: { id: runId },
           data: {
-            status: "FAILED",
-            output: result.error,
+            status: finalStatus,
             completedAt: new Date(),
           },
         });
-        continue;
-      }
 
-      // Update model run with output
-      await prisma.modelRun.update({
-        where: { id: modelRun.id },
-        data: {
-          status: "COMPLETED",
-          output: result.output,
-          tokensUsed: result.tokensUsed,
-          completedAt: new Date(),
-        },
-      });
-
-      // Save category scores
-      const { categoryEvaluations } = result.evaluation;
-
-      for (const catEval of categoryEvaluations) {
-        // Get or create category
-        let category = await prisma.benchmarkCategory.findFirst({
-          where: { name: catEval.category },
-        });
-
-        if (!category) {
-          category = await prisma.benchmarkCategory.create({
-            data: {
-              name: catEval.category,
-              description: `${catEval.category} evaluation category`,
-            },
-          });
-        }
-
-        // Save category score
-        await prisma.categoryScore.create({
+        console.log(`[Run API] Benchmark ${runId} completed with status: ${finalStatus}`);
+      } catch (execError) {
+        console.error(`[Run API] Error during benchmark execution ${runId}:`, execError);
+        // Update status to failed
+        await prisma.benchmarkRun.update({
+          where: { id: runId },
           data: {
-            modelRunId: modelRun.id,
-            categoryId: category.id,
-            totalScore: catEval.totalScore,
+            status: "FAILED",
+            completedAt: new Date(),
           },
         });
-
-        // Save metric scores
-        for (const metric of catEval.metrics) {
-          // Get or create metric definition
-          let metricDef = await prisma.categoryMetric.findFirst({
-            where: {
-              categoryId: category.id,
-              name: metric.name,
-            },
-          });
-
-          if (!metricDef) {
-            const metrics = getCategoryMetrics(catEval.category);
-            const metricConfig = metrics.find((m) => m.name === metric.name);
-            metricDef = await prisma.categoryMetric.create({
-              data: {
-                categoryId: category.id,
-                name: metric.name,
-                description: `${metric.name} evaluation metric`,
-                weight: metricConfig?.weight ?? 1.0,
-              },
-            });
-          }
-
-          // Create score record
-          const scoreRecord = await prisma.score.create({
-            data: {
-              modelRunId: modelRun.id,
-              categoryId: category.id,
-              metricId: metricDef.id,
-              value: metric.score,
-              aiConfidence: metric.confidence,
-            },
-          });
-
-          // Create metric score (for detailed breakdown)
-          await prisma.metricScore.create({
-            data: {
-              scoreId: scoreRecord.id,
-              metricId: metricDef.id,
-              value: metric.score,
-              explanation: metric.reasoning,
-            },
-          });
-        }
       }
-    }
+    })();
 
-    // Update benchmark run status
-    const hasSuccesses = results.some((r) => !r.error);
-    const hasCancelled = results.some((r) => r.error === "CANCELLED");
-
-    // Determine appropriate status based on results
-    // Note: Using COMPLETED for partial failures since PARTIAL is not in the RunStatus enum
-    // Consider adding PARTIAL status to schema for better tracking
-    let finalStatus: "COMPLETED" | "FAILED" | "CANCELLED" = "FAILED";
-    if (hasCancelled && !hasSuccesses) {
-      finalStatus = "CANCELLED"; // All were cancelled
-    } else if (hasSuccesses) {
-      finalStatus = "COMPLETED"; // All successes or mixed (partial failures)
-    } else {
-      finalStatus = "FAILED"; // All models failed
-    }
-
-    await prisma.benchmarkRun.update({
-      where: { id: benchmarkRun.id },
-      data: {
-        status: finalStatus,
-        completedAt: new Date(),
-      },
-    });
-
-    // Return response
+    // Return response immediately - execution continues in background
     return NextResponse.json({
       runId: benchmarkRun.id,
-      status: "COMPLETED",
+      status: "RUNNING",
+      message: "Benchmark started. Connect to SSE for progress updates.",
       startedAt: benchmarkRun.startedAt.toISOString(),
-      completedAt: new Date().toISOString(),
-      models: results.map((r) => ({
-        modelId: r.modelId,
-        status: r.error ? "FAILED" : "COMPLETED",
-        totalScore: r.evaluation?.totalScore,
-        error: r.error,
-      })),
     });
   } catch (error) {
     logError(error, { context: "POST /api/benchmarks/run" });

@@ -16,14 +16,20 @@ export interface ProgressData {
   stepNumber: number;
   totalSteps: number;
   percentage: number;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: "pending" | "running" | "completed" | "failed";
   message?: string;
   metadata?: Record<string, unknown>;
+  modelName?: string; // Current model being processed
+  modelProvider?: string; // Provider of current model
+  currentModelIndex?: number; // Index of current model (0-based)
+  totalModels?: number; // Total number of models
+  currentBenchmark?: string; // Current benchmark name
+  currentModel?: string; // Current model ID
 }
 
 export interface LogData {
   benchmarkRunId: string;
-  level: 'info' | 'warning' | 'error' | 'debug';
+  level: "info" | "warning" | "error" | "debug";
   message: string;
   metadata?: Record<string, unknown>;
   timestamp: string;
@@ -72,7 +78,7 @@ export class SSEEmitter {
    */
   private emit(event: string, data: unknown): void {
     if (!this.controller) {
-      console.warn('[SSE] Attempted to emit but no controller available');
+      console.warn("[SSE] Attempted to emit but no controller available");
       return;
     }
 
@@ -85,28 +91,28 @@ export class SSEEmitter {
    * Emit a progress update event
    */
   progress(data: ProgressData): void {
-    this.emit('progress', data);
+    this.emit("progress", data);
   }
 
   /**
    * Emit a log entry event
    */
   log(data: LogData): void {
-    this.emit('log', data);
+    this.emit("log", data);
   }
 
   /**
    * Emit a completion event
    */
   complete(data: CompleteData): void {
-    this.emit('complete', data);
+    this.emit("complete", data);
   }
 
   /**
    * Emit an error event
    */
   error(message: string, metadata?: Record<string, unknown>): void {
-    this.emit('error', { message, metadata });
+    this.emit("error", { message, metadata });
   }
 
   /**
@@ -116,9 +122,9 @@ export class SSEEmitter {
     if (this.controller) {
       try {
         this.controller.close();
-        console.info('[SSE] Controller closed');
+        console.info("[SSE] Controller closed");
       } catch (e) {
-        console.error('[SSE] Error closing controller:', e);
+        console.error("[SSE] Error closing controller:", e);
       } finally {
         this.controller = null;
       }

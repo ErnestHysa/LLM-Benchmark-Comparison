@@ -4,8 +4,8 @@
  * Functions to broadcast progress updates to connected SSE clients
  */
 
-import type { ProgressData, LogData } from './sse';
-import { getEmitter } from './sse';
+import type { ProgressData, LogData } from "./sse";
+import { getEmitter } from "./sse";
 
 /**
  * Broadcast a progress update to all connected clients for a benchmark run
@@ -14,7 +14,9 @@ import { getEmitter } from './sse';
 export function broadcastProgress(data: ProgressData): void {
   const emitter = getEmitter(data.benchmarkRunId);
   emitter.progress(data);
-  console.info(`[Progress] ${data.stepName} (${data.stepNumber}/${data.totalSteps}) - ${data.percentage.toFixed(1)}%`);
+  console.info(
+    `[Progress] ${data.stepName} (${data.stepNumber}/${data.totalSteps}) - ${data.percentage.toFixed(1)}%`
+  );
 }
 
 /**
@@ -50,7 +52,7 @@ export function broadcastComplete(
     results,
     error,
   });
-  console.info(`[Complete] Benchmark ${benchmarkRunId} - ${success ? 'SUCCESS' : 'FAILED'}`);
+  console.info(`[Complete] Benchmark ${benchmarkRunId} - ${success ? "SUCCESS" : "FAILED"}`);
 }
 
 /**
@@ -59,7 +61,11 @@ export function broadcastComplete(
  * @param error - Error message
  * @param metadata - Optional metadata
  */
-export function broadcastError(benchmarkRunId: string, error: string, metadata?: Record<string, unknown>): void {
+export function broadcastError(
+  benchmarkRunId: string,
+  error: string,
+  metadata?: Record<string, unknown>
+): void {
   const emitter = getEmitter(benchmarkRunId);
   const errorMessage = metadata ? `${error}: ${JSON.stringify(metadata)}` : error;
   emitter.error(errorMessage);
@@ -72,12 +78,15 @@ export function broadcastError(benchmarkRunId: string, error: string, metadata?:
  * @param modelName - Name of the model being started
  * @param modelIndex - Index of the model
  * @param totalModels - Total number of models
+ * @param modelProvider - Provider of the model (optional)
  */
 export function broadcastModelStart(
   benchmarkRunId: string,
   modelName: string,
   modelIndex: number,
-  totalModels: number
+  totalModels: number,
+  modelProvider?: string,
+  benchmarkName?: string
 ): void {
   broadcastProgress({
     benchmarkRunId,
@@ -85,8 +94,14 @@ export function broadcastModelStart(
     stepNumber: modelIndex,
     totalSteps: totalModels,
     percentage: (modelIndex / totalModels) * 100,
-    status: 'running',
+    status: "running",
     message: `Starting ${modelName}...`,
+    modelName,
+    modelProvider,
+    currentModelIndex: modelIndex,
+    totalModels,
+    currentModel: modelName,
+    currentBenchmark: benchmarkName,
   });
 }
 
@@ -97,13 +112,17 @@ export function broadcastModelStart(
  * @param modelIndex - Index of the model
  * @param totalModels - Total number of models
  * @param score - Optional score
+ * @param modelProvider - Provider of the model (optional)
+ * @param benchmarkName - Name of the benchmark (optional)
  */
 export function broadcastModelComplete(
   benchmarkRunId: string,
   modelName: string,
   modelIndex: number,
   totalModels: number,
-  score?: number
+  score?: number,
+  modelProvider?: string,
+  benchmarkName?: string
 ): void {
   broadcastProgress({
     benchmarkRunId,
@@ -111,8 +130,14 @@ export function broadcastModelComplete(
     stepNumber: modelIndex,
     totalSteps: totalModels,
     percentage: (modelIndex / totalModels) * 100,
-    status: 'completed',
-    message: score ? `Score: ${score.toFixed(1)}%` : 'Completed',
+    status: "completed",
+    message: score ? `Score: ${score.toFixed(1)}%` : "Completed",
+    modelName,
+    modelProvider,
+    currentModelIndex: modelIndex,
+    totalModels,
+    currentModel: modelName,
+    currentBenchmark: benchmarkName,
   });
 }
 
@@ -123,17 +148,21 @@ export function broadcastModelComplete(
  * @param modelIndex - Index of the model
  * @param totalModels - Total number of models
  * @param error - Error message
+ * @param modelProvider - Provider of the model (optional)
+ * @param benchmarkName - Name of the benchmark (optional)
  */
 export function broadcastModelFailure(
   benchmarkRunId: string,
   modelName: string,
   modelIndex: number,
   totalModels: number,
-  error: string
+  error: string,
+  modelProvider?: string,
+  benchmarkName?: string
 ): void {
   broadcastLog({
     benchmarkRunId,
-    level: 'error',
+    level: "error",
     message: `${modelName} failed: ${error}`,
     timestamp: new Date().toISOString(),
   });
@@ -143,8 +172,14 @@ export function broadcastModelFailure(
     stepNumber: modelIndex,
     totalSteps: totalModels,
     percentage: (modelIndex / totalModels) * 100,
-    status: 'failed',
+    status: "failed",
     message: `${modelName} failed`,
+    modelName,
+    modelProvider,
+    currentModelIndex: modelIndex,
+    totalModels,
+    currentModel: modelName,
+    currentBenchmark: benchmarkName,
   });
 }
 
@@ -156,7 +191,7 @@ export function broadcastModelFailure(
 export function broadcastEvaluationStart(benchmarkRunId: string, modelName: string): void {
   broadcastLog({
     benchmarkRunId,
-    level: 'info',
+    level: "info",
     message: `Evaluating ${modelName}...`,
     timestamp: new Date().toISOString(),
   });
@@ -170,11 +205,11 @@ export function broadcastEvaluationStart(benchmarkRunId: string, modelName: stri
 export function broadcastInitialization(benchmarkRunId: string, totalSteps: number): void {
   broadcastProgress({
     benchmarkRunId,
-    stepName: 'Initializing benchmark',
+    stepName: "Initializing benchmark",
     stepNumber: 0,
     totalSteps,
     percentage: 0,
-    status: 'pending',
-    message: 'Preparing to run benchmark...',
+    status: "pending",
+    message: "Preparing to run benchmark...",
   });
 }
